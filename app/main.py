@@ -37,7 +37,7 @@ if not OPENAI_VECTOR_STORE_ID:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="Telegram AI Bot", version="2.0.0")
+app = FastAPI(title="Telegram AI Bot", version="2.1.0")
 
 # Защита от дублей update_id
 processed_updates: set[int] = set()
@@ -72,20 +72,29 @@ async def send_telegram_message(chat_id: int, text: str) -> None:
 
 def build_system_prompt() -> str:
     return (
-        "Ты — AI-ассистент компании Finko. "
-        "Отвечай только на основе найденного контекста из базы знаний Finko. "
-        "Не выдумывай факты, суммы, сроки, адреса, статусы, проценты и обещания. "
-        "Если точного ответа в базе знаний нет, честно скажи: "
-        "'Я не нашёл точную информацию в базе знаний Finko.' "
-        "Отвечай простым, понятным и дружелюбным русским языком. "
-        "Если пользователь спрашивает про услуги, объясняй коротко и по делу."
+        "Ты — AI-ассистент компании Finko.\n\n"
+        "Твоя задача — помогать пользователям, а не копировать текст из базы.\n\n"
+        "Правила:\n"
+        "- Отвечай своими словами, а не копируй текст дословно\n"
+        "- Делай ответ живым и разговорным\n"
+        "- Не пиши длинные скрипты как колл-центр\n"
+        "- Отвечай кратко и по делу, обычно 2–5 предложений\n"
+        "- Если нужно, можно коротко пояснить\n"
+        "- Не используй одинаковые фразы каждый раз\n"
+        "- Не начинай каждый ответ со слова 'Здравствуйте'\n\n"
+        "Очень важно:\n"
+        "- Используй только информацию из базы знаний Finko\n"
+        "- Не выдумывай факты\n"
+        "- Если точного ответа нет, скажи: "
+        "'Я не нашёл точную информацию в базе знаний Finko.'\n\n"
+        "Стиль ответа:\n"
+        "- как живой человек\n"
+        "- дружелюбно\n"
+        "- без лишней воды\n"
     )
 
 
 def search_knowledge_base(user_text: str) -> str | None:
-    """
-    Ищет релевантные куски текста в OpenAI Vector Store.
-    """
     try:
         result = client.vector_stores.search(
             vector_store_id=OPENAI_VECTOR_STORE_ID,
@@ -127,8 +136,13 @@ def generate_answer(user_text: str) -> str:
 {kb_context}
 
 Сформируй ответ только по этому контексту.
-Если контекст неполный или точного ответа нет, честно скажи:
-"Я не нашёл точную информацию в базе знаний Finko."
+
+Правила:
+- Отвечай своими словами
+- Не копируй текст дословно
+- Кратко, обычно до 4-5 предложений
+- Без скриптов и канцелярита
+- Если ответа нет, скажи: "Я не нашёл точную информацию в базе знаний Finko."
 """.strip()
 
     try:
@@ -136,7 +150,7 @@ def generate_answer(user_text: str) -> str:
             model=OPENAI_MODEL,
             instructions=build_system_prompt(),
             input=prompt,
-            temperature=0.2,
+            temperature=0.5,
         )
 
         answer = (response.output_text or "").strip()
@@ -187,7 +201,6 @@ async def telegram_webhook(
 
         processed_updates.add(update_id)
 
-        # чтобы set не рос бесконечно
         if len(processed_updates) > 1000:
             processed_updates.clear()
             processed_updates.add(update_id)
