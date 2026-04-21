@@ -17,13 +17,14 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
-
 logger = logging.getLogger("telegram-ai-bot")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+OPENAI_VECTOR_STORE_ID = os.getenv("OPENAI_VECTOR_STORE_ID")
+KB_MAX_CHUNKS = int(os.getenv("KB_MAX_CHUNKS", "5"))
 
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY is not set")
@@ -31,12 +32,14 @@ if not TELEGRAM_BOT_TOKEN:
     raise RuntimeError("TELEGRAM_BOT_TOKEN is not set")
 if not TELEGRAM_WEBHOOK_SECRET:
     raise RuntimeError("TELEGRAM_WEBHOOK_SECRET is not set")
+if not OPENAI_VECTOR_STORE_ID:
+    raise RuntimeError("OPENAI_VECTOR_STORE_ID is not set")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="Telegram AI Bot", version="1.0.0")
+app = FastAPI(title="Telegram AI Bot", version="2.0.0")
 
-# Храним уже обработанные update_id, чтобы бот не отвечал по несколько раз
+# Защита от дублей update_id
 processed_updates: set[int] = set()
 
 
@@ -69,26 +72,87 @@ async def send_telegram_message(chat_id: int, text: str) -> None:
 
 def build_system_prompt() -> str:
     return (
-        "Ты — вежливый AI-ассистент компании. "
-        "Отвечай кратко, понятно и по делу. "
-        "Не здоровайся в каждом сообщении заново, если пользователь уже начал диалог. "
-        "Если не уверен, так и скажи. "
-        "Не выдумывай факты о компании."
+        "Ты — AI-ассистент компании Finko. "
+        "Отвечай только на основе найденного контекста из базы знаний Finko. "
+        "Не выдумывай факты, суммы, сроки, адреса, статусы, проценты и обещания. "
+        "Если точного ответа в базе знаний нет, честно скажи: "
+        "'Я не нашёл точную информацию в базе знаний Finko.' "
+        "Отвечай простым, понятным и дружелюбным русским языком. "
+        "Если пользователь спрашивает про услуги, объясняй коротко и по делу."
     )
 
 
-def ask_openai(user_text: str) -> str:
-    response = client.responses.create(
-        model=OPENAI_MODEL,
-        instructions=build_system_prompt(),
-        input=user_text,
-        temperature=0.3,
-    )
+def search_knowledge_base(user_text: str) -> str | None:
+    """
+    Ищет релевантные куски текста в OpenAI Vector Store.
+    """
+    try:
+        result = client.vector_stores.search(
+            vector_store_id=OPENAI_VECTOR_STORE_ID,
+            query=user_text,
+            max_num_results=KB_MAX_CHUNKS,
+        )
+    except Exception as e:
+        logger.exception("Knowledge base search failed: %s", e)
+        return None
 
-    answer = response.output_text
-    if not answer:
-        return "Не получилось сформировать ответ. Попробуйте ещё раз."
-    return answer.strip()
+    chunks: list[str] = []
+
+    for item in getattr(result, "data", []) or []:
+        filename = getattr(item, "filename", None) or getattr(item, "file_name", None) or "unknown_file"
+        content_list = getattr(item, "content", []) or []
+
+        for block in content_list:
+            text = getattr(block, "text", None)
+            if text:
+                chunks.append(f"Источник: {filename}\n{text.strip()}")
+
+    if not chunks:
+        return None
+
+    return "\n\n---\n\n".join(chunks[:KB_MAX_CHUNKS])
+
+
+def generate_answer(user_text: str) -> str:
+    kb_context = search_knowledge_base(user_text)
+
+    if not kb_context:
+        return "Я не нашёл точную информацию в базе знаний Finko."
+
+    prompt = f"""
+Вопрос пользователя:
+{user_text}
+
+Контекст из базы знаний Finko:
+{kb_context}
+
+Сформируй ответ только по этому контексту.
+Если контекст неполный или точного ответа нет, честно скажи:
+"Я не нашёл точную информацию в базе знаний Finko."
+""".strip()
+
+    try:
+        response = client.responses.create(
+            model=OPENAI_MODEL,
+            instructions=build_system_prompt(),
+            input=prompt,
+            temperature=0.2,
+        )
+
+        answer = (response.output_text or "").strip()
+
+        if not answer:
+            return "Не получилось сформировать ответ. Попробуйте ещё раз."
+
+        return answer
+
+    except RateLimitError:
+        logger.exception("OpenAI quota exceeded")
+        return "OpenAI API сейчас недоступен: закончилась квота или не настроен billing."
+
+    except Exception as e:
+        logger.exception("OpenAI answer generation failed: %s", e)
+        return "Произошла ошибка при формировании ответа. Попробуйте чуть позже."
 
 
 @app.get("/")
@@ -113,7 +177,7 @@ async def telegram_webhook(
         )
 
     update = await request.json()
-    logger.info("Incoming update: %s", update)
+    logger.info("Incoming update received")
 
     update_id = update.get("update_id")
     if update_id is not None:
@@ -133,17 +197,9 @@ async def telegram_webhook(
         return JSONResponse({"ok": True, "skipped": True})
 
     try:
-        answer = ask_openai(user_text)
+        answer = generate_answer(user_text)
         await send_telegram_message(chat_id, answer)
         return JSONResponse({"ok": True})
-
-    except RateLimitError:
-        logger.exception("OpenAI quota exceeded")
-        await send_telegram_message(
-            chat_id,
-            "OpenAI API сейчас недоступен: закончилась квота или не настроен billing.",
-        )
-        return JSONResponse({"ok": True, "error": "openai_quota_exceeded"})
 
     except httpx.HTTPError as e:
         logger.exception("Telegram API error: %s", e)
@@ -158,4 +214,5 @@ async def telegram_webhook(
             )
         except Exception:
             logger.exception("Failed to send fallback message")
+
         raise HTTPException(status_code=500, detail="Internal server error")
