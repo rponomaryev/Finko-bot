@@ -36,8 +36,11 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 app = FastAPI(title="Telegram AI Bot", version="1.0.0")
 
+# Храним уже обработанные update_id, чтобы бот не отвечал по несколько раз
+processed_updates: set[int] = set()
 
-def extract_user_message(update: dict[str, Any]) -> tuple[int, str] | tuple[None, None]:
+
+def extract_user_message(update: dict[str, Any]) -> tuple[int | None, str | None]:
     message = update.get("message")
     if not message:
         return None, None
@@ -66,8 +69,9 @@ async def send_telegram_message(chat_id: int, text: str) -> None:
 
 def build_system_prompt() -> str:
     return (
-        "Ты - вежливый AI-ассистент компании. "
+        "Ты — вежливый AI-ассистент компании. "
         "Отвечай кратко, понятно и по делу. "
+        "Не здоровайся в каждом сообщении заново, если пользователь уже начал диалог. "
         "Если не уверен, так и скажи. "
         "Не выдумывай факты о компании."
     )
@@ -85,6 +89,11 @@ def ask_openai(user_text: str) -> str:
     if not answer:
         return "Не получилось сформировать ответ. Попробуйте ещё раз."
     return answer.strip()
+
+
+@app.get("/")
+async def root() -> dict[str, str]:
+    return {"message": "Telegram AI Bot is running"}
 
 
 @app.get("/health")
@@ -105,6 +114,19 @@ async def telegram_webhook(
 
     update = await request.json()
     logger.info("Incoming update: %s", update)
+
+    update_id = update.get("update_id")
+    if update_id is not None:
+        if update_id in processed_updates:
+            logger.info("Duplicate update skipped: %s", update_id)
+            return JSONResponse({"ok": True, "duplicate": True})
+
+        processed_updates.add(update_id)
+
+        # чтобы set не рос бесконечно
+        if len(processed_updates) > 1000:
+            processed_updates.clear()
+            processed_updates.add(update_id)
 
     chat_id, user_text = extract_user_message(update)
     if not chat_id or not user_text:
