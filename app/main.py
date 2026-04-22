@@ -54,7 +54,7 @@ if not OPENAI_VECTOR_STORE_ID:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="Telegram AI Bot", version="4.2.0")
+app = FastAPI(title="Telegram AI Bot", version="4.3.0")
 
 # ============================================================
 # In-memory state
@@ -75,6 +75,7 @@ db_lock = threading.Lock()
 # Database
 # ============================================================
 
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -88,6 +89,13 @@ def get_db():
         conn.commit()
     finally:
         conn.close()
+
+
+def ensure_column_exists(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    existing = {row["name"] for row in rows}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def init_db() -> None:
@@ -138,6 +146,9 @@ def init_db() -> None:
                 """
             )
 
+            # Safe migration for interface language
+            ensure_column_exists(conn, "users", "selected_language", "TEXT")
+
 
 @app.on_event("startup")
 async def startup_event():
@@ -152,6 +163,7 @@ def upsert_user_profile(
     last_name: str | None,
     language: str,
     user_type: str,
+    selected_language: str | None = None,
 ) -> None:
     now = utc_now_iso()
     with db_lock:
@@ -162,37 +174,63 @@ def upsert_user_profile(
             ).fetchone()
 
             if row:
-                conn.execute(
-                    """
-                    UPDATE users
-                    SET username = ?,
-                        first_name = ?,
-                        last_name = ?,
-                        last_language = ?,
-                        user_type = ?,
-                        last_seen_at = ?,
-                        messages_count = messages_count + 1
-                    WHERE chat_id = ?
-                    """,
-                    (
-                        username,
-                        first_name,
-                        last_name,
-                        language,
-                        user_type,
-                        now,
-                        chat_id,
-                    ),
-                )
+                if selected_language is None:
+                    conn.execute(
+                        """
+                        UPDATE users
+                        SET username = ?,
+                            first_name = ?,
+                            last_name = ?,
+                            last_language = ?,
+                            user_type = ?,
+                            last_seen_at = ?,
+                            messages_count = messages_count + 1
+                        WHERE chat_id = ?
+                        """,
+                        (
+                            username,
+                            first_name,
+                            last_name,
+                            language,
+                            user_type,
+                            now,
+                            chat_id,
+                        ),
+                    )
+                else:
+                    conn.execute(
+                        """
+                        UPDATE users
+                        SET username = ?,
+                            first_name = ?,
+                            last_name = ?,
+                            last_language = ?,
+                            selected_language = ?,
+                            user_type = ?,
+                            last_seen_at = ?,
+                            messages_count = messages_count + 1
+                        WHERE chat_id = ?
+                        """,
+                        (
+                            username,
+                            first_name,
+                            last_name,
+                            language,
+                            selected_language,
+                            user_type,
+                            now,
+                            chat_id,
+                        ),
+                    )
             else:
                 conn.execute(
                     """
                     INSERT INTO users (
                         chat_id, username, first_name, last_name,
-                        last_language, user_type,
+                        last_language, selected_language, user_type,
                         first_seen_at, last_seen_at, messages_count
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     """,
                     (
                         chat_id,
@@ -200,11 +238,24 @@ def upsert_user_profile(
                         first_name,
                         last_name,
                         language,
+                        selected_language,
                         user_type,
                         now,
                         now,
                     ),
                 )
+
+
+def get_user_ui_language(chat_id: int) -> str | None:
+    with db_lock:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT selected_language FROM users WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+            if row and row["selected_language"]:
+                return row["selected_language"]
+    return None
 
 
 def log_message(
@@ -264,7 +315,7 @@ UZ_LATN_HINTS_RE = re.compile(
     r"to'lov|o'zbek|uzbek|qaysi|bilan|ishlaysiz|kompaniya|tashkilot|"
     r"ma'lumot|mavjud|kerakmi|bormi|qiladi|qilinadi|yoki|hamkor|biznes|"
     r"aloqa|kontakt|kredit|qarz|mfo|mmt|moliya|savol|javob|foydalanuvchi|"
-    r"kreditlar|kontaktlar|hamkorlarga|biznes"
+    r"kreditlar|kontaktlar|hamkorlarga|hamkorlar"
     r")\b",
     re.IGNORECASE,
 )
@@ -274,7 +325,7 @@ UZ_CYRL_HINTS_RE = re.compile(
     r"салом|ассалому|рахмат|илтимос|қандай|қайси|мумкин|керак|"
     r"ариза|банклар|ҳамкорлар|мижоз|фоиз|муддат|шартлар|ҳужжат|"
     r"тўлов|маълумот|мавжуд|алоқа|контакт|кредит|қарз|ммт|молия|"
-    r"жавоб|савол|фойдаланувчи|контактлар|кредитлар|ҳамкорларга|бизнес"
+    r"жавоб|савол|фойдаланувчи|контактлар|кредитлар|ҳамкорларга|ҳамкорлар|бизнес"
     r")\b",
     re.IGNORECASE,
 )
@@ -490,7 +541,7 @@ def infer_user_type(intent: str, user_text: str) -> str:
     return "customer"
 
 # ============================================================
-# Telegram UI
+# Telegram UI / language selection
 # ============================================================
 
 def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
@@ -541,12 +592,64 @@ def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
     }
 
 
-async def send_telegram_message(chat_id: int, text: str, ui_lang: str = "ru") -> None:
+def get_language_keyboard() -> dict[str, Any]:
+    return {
+        "keyboard": [
+            [{"text": "🇷🇺 Русский"}],
+            [{"text": "🇺🇿 O‘zbek (Lotin)"}],
+            [{"text": "🇺🇿 Ўзбек (Кирилл)"}],
+            [{"text": "🇬🇧 English"}],
+        ],
+        "resize_keyboard": True,
+        "one_time_keyboard": True,
+        "input_field_placeholder": "Choose language / Выберите язык / Tilni tanlang",
+    }
+
+
+def handle_language_selection(text: str) -> str | None:
+    lowered = text.lower().strip()
+
+    if "рус" in lowered:
+        return "ru"
+    if "lotin" in lowered:
+        return "uz_latn"
+    if "кирил" in lowered or "ўзбек" in lowered:
+        return "uz_cyrl"
+    if "english" in lowered:
+        return "en"
+
+    return None
+
+
+def build_language_saved_text(lang: str) -> str:
+    messages = {
+        "ru": "Язык интерфейса сохранён ✅",
+        "uz_latn": "Interfeys tili saqlandi ✅",
+        "uz_cyrl": "Интерфейс тили сақланди ✅",
+        "en": "Interface language saved ✅",
+    }
+    return messages.get(lang, messages["ru"])
+
+
+def build_start_language_text() -> str:
+    return (
+        "Выберите язык интерфейса.\n"
+        "Choose interface language.\n"
+        "Интерфейс тилини танланг."
+    )
+
+
+async def send_telegram_message(
+    chat_id: int,
+    text: str,
+    ui_lang: str = "ru",
+    custom_keyboard: dict[str, Any] | None = None,
+) -> None:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text,
-        "reply_markup": get_keyboard_for_lang(ui_lang),
+        "reply_markup": custom_keyboard if custom_keyboard is not None else get_keyboard_for_lang(ui_lang),
     }
 
     async with httpx.AsyncClient(timeout=TELEGRAM_TIMEOUT_SECONDS) as http_client:
@@ -717,6 +820,10 @@ def should_use_quick_reply(intent: str, user_text: str) -> bool:
         return True
 
     return False
+
+
+def resolve_response_language_for_message(user_text: str) -> str:
+    return detect_language(user_text)
 
 
 def handle_menu_or_quick_action(user_text: str, chat_id: int) -> tuple[str | None, str | None]:
@@ -1088,7 +1195,7 @@ Requirements:
 
 
 def generate_answer(chat_id: int, user_text: str, intent: str, user_type: str) -> str:
-    response_lang = detect_language(user_text)
+    response_lang = resolve_response_language_for_message(user_text)
 
     kb_context = search_knowledge_base(
         user_text=user_text,
@@ -1260,7 +1367,7 @@ async def analytics_top_users(
         with get_db() as conn:
             rows = conn.execute(
                 """
-                SELECT chat_id, username, first_name, last_name, messages_count, user_type, last_language
+                SELECT chat_id, username, first_name, last_name, messages_count, user_type, last_language, selected_language
                 FROM users
                 ORDER BY messages_count DESC
                 LIMIT ?
@@ -1278,6 +1385,7 @@ async def analytics_top_users(
                 "messages_count": row["messages_count"],
                 "user_type": row["user_type"],
                 "last_language": row["last_language"],
+                "selected_language": row["selected_language"],
             }
             for row in rows
         ]
@@ -1317,7 +1425,43 @@ async def telegram_webhook(
     if not chat_id or not user_text:
         return JSONResponse({"ok": True, "skipped": True})
 
-    detected_lang = detect_language(user_text)
+    # /start => ask for UI language
+    if user_text == "/start":
+        await send_telegram_message(
+            chat_id,
+            build_start_language_text(),
+            ui_lang="ru",
+            custom_keyboard=get_language_keyboard(),
+        )
+        log_event(chat_id, "start_shown", "language_selector")
+        return JSONResponse({"ok": True, "source": "start_language_selector"})
+
+    # explicit UI language selection
+    selected_lang = handle_language_selection(user_text)
+    if selected_lang:
+        upsert_user_profile(
+            chat_id=chat_id,
+            username=profile.get("username"),
+            first_name=profile.get("first_name"),
+            last_name=profile.get("last_name"),
+            language=selected_lang,
+            user_type="customer",
+            selected_language=selected_lang,
+        )
+
+        confirmation = build_language_saved_text(selected_lang)
+
+        await send_telegram_message(
+            chat_id,
+            confirmation,
+            ui_lang=selected_lang,
+        )
+
+        log_event(chat_id, "ui_language_selected", selected_lang)
+        return JSONResponse({"ok": True, "selected_language": selected_lang})
+
+    message_lang = detect_language(user_text)
+    ui_lang = get_user_ui_language(chat_id) or message_lang
     intent = detect_intent(user_text)
     user_type = infer_user_type(intent, user_text)
 
@@ -1326,15 +1470,16 @@ async def telegram_webhook(
         username=profile.get("username"),
         first_name=profile.get("first_name"),
         last_name=profile.get("last_name"),
-        language=detected_lang,
+        language=message_lang,
         user_type=user_type,
+        selected_language=None,
     )
 
     log_message(
         chat_id=chat_id,
         direction="inbound",
         text=user_text,
-        language=detected_lang,
+        language=message_lang,
         intent=intent,
         user_type=user_type,
         source="telegram",
@@ -1342,14 +1487,14 @@ async def telegram_webhook(
 
     quick_answer, quick_intent = handle_menu_or_quick_action(user_text, chat_id)
     if quick_answer:
-        await send_telegram_message(chat_id, quick_answer, ui_lang=detected_lang)
+        await send_telegram_message(chat_id, quick_answer, ui_lang=ui_lang)
         save_assistant_message(chat_id, quick_answer)
 
         log_message(
             chat_id=chat_id,
             direction="outbound",
             text=quick_answer,
-            language=detected_lang,
+            language=message_lang,
             intent=quick_intent,
             user_type=user_type,
             source="quick",
@@ -1367,14 +1512,14 @@ async def telegram_webhook(
             user_type=user_type,
         )
 
-        await send_telegram_message(chat_id, answer, ui_lang=detected_lang)
+        await send_telegram_message(chat_id, answer, ui_lang=ui_lang)
         save_assistant_message(chat_id, answer)
 
         log_message(
             chat_id=chat_id,
             direction="outbound",
             text=answer,
-            language=detected_lang,
+            language=message_lang,
             intent=intent,
             user_type=user_type,
             source="openai",
@@ -1384,7 +1529,8 @@ async def telegram_webhook(
         return JSONResponse(
             {
                 "ok": True,
-                "language": detected_lang,
+                "message_language": message_lang,
+                "ui_language": ui_lang,
                 "intent": intent,
                 "user_type": user_type,
                 "source": "openai",
@@ -1397,15 +1543,15 @@ async def telegram_webhook(
 
     except Exception as e:
         logger.exception("Unhandled error: %s", e)
-        fallback_text = server_error_message(detected_lang)
+        fallback_text = server_error_message(message_lang)
 
         try:
-            await send_telegram_message(chat_id, fallback_text, ui_lang=detected_lang)
+            await send_telegram_message(chat_id, fallback_text, ui_lang=ui_lang)
             log_message(
                 chat_id=chat_id,
                 direction="outbound",
                 text=fallback_text,
-                language=detected_lang,
+                language=message_lang,
                 intent=intent,
                 user_type=user_type,
                 source="fallback",
