@@ -482,7 +482,7 @@ def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
         "ru": {
             "credits": "Кредиты",
             "business": "Бизнес",
-            "partners": "Партнёрам",
+            "partners": "Партнёры",
             "restart": "Restart",
             "contacts": "Контакты",
             "placeholder": "Напишите вопрос...",
