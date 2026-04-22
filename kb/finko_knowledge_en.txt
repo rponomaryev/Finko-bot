@@ -154,3 +154,5 @@ Office: Tashkent, Mirobod district, Oybek St. 18/1, ATRIUM Business Center
 Website: https://finko.uz/en
 
 If a user's question cannot be answered based on the knowledge base, inform them honestly and suggest contacting FINKO via the details above.
+
+Link on the company web site: https://finko.uz/ru
