@@ -35,13 +35,11 @@ TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_VECTOR_STORE_ID = os.getenv("OPENAI_VECTOR_STORE_ID")
 
-# Search settings
 KB_SEARCH_RESULTS = int(os.getenv("KB_SEARCH_RESULTS", "20"))
 KB_MAX_CHUNKS = int(os.getenv("KB_MAX_CHUNKS", "8"))
 CHAT_MEMORY_TURNS = int(os.getenv("CHAT_MEMORY_TURNS", "8"))
 TELEGRAM_TIMEOUT_SECONDS = float(os.getenv("TELEGRAM_TIMEOUT_SECONDS", "30"))
 
-# Analytics / DB
 DATABASE_PATH = os.getenv("DATABASE_PATH", str(BASE_DIR / "bot_analytics.db"))
 ADMIN_ANALYTICS_TOKEN = os.getenv("ADMIN_ANALYTICS_TOKEN", "")
 
@@ -56,7 +54,7 @@ if not OPENAI_VECTOR_STORE_ID:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="Telegram AI Bot", version="4.1.0")
+app = FastAPI(title="Telegram AI Bot", version="4.2.0")
 
 # ============================================================
 # In-memory state
@@ -64,12 +62,9 @@ app = FastAPI(title="Telegram AI Bot", version="4.1.0")
 
 processed_updates: set[int] = set()
 
-# Store only USER messages for conversational continuity
 chat_user_history: dict[int, deque[str]] = defaultdict(
     lambda: deque(maxlen=CHAT_MEMORY_TURNS)
 )
-
-# Store recent assistant replies to reduce repetition
 chat_assistant_history: dict[int, deque[str]] = defaultdict(
     lambda: deque(maxlen=5)
 )
@@ -79,7 +74,6 @@ db_lock = threading.Lock()
 # ============================================================
 # Database
 # ============================================================
-
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -255,43 +249,42 @@ def log_event(chat_id: int | None, event_type: str, payload: str | None = None) 
                 (chat_id, event_type, payload, utc_now_iso()),
             )
 
-
 # ============================================================
 # Language detection
 # ============================================================
 
-RUSSIAN_CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
-UZBEK_CYRILLIC_SPECIFIC_RE = re.compile(r"[ЎўҚқҒғҲҳ]")
+UZ_CYR_SPECIFIC_RE = re.compile(r"[ЎўҚқҒғҲҳ]")
+ANY_CYR_RE = re.compile(r"[А-Яа-яЁёЎўҚқҒғҲҳ]")
 LATIN_RE = re.compile(r"[A-Za-z]")
 
-UZBEK_LATIN_HINTS_RE = re.compile(
+UZ_LATN_HINTS_RE = re.compile(
     r"\b("
     r"yo'q|ha|salom|assalomu|rahmat|iltimos|bo'yicha|qanday|qanaqa|mumkin|kerak|"
     r"ariza|banklar|hamkorlar|mijoz|foiz|muddat|shartlar|tasdiq|rad|hujjat|"
     r"to'lov|o'zbek|uzbek|qaysi|bilan|ishlaysiz|kompaniya|tashkilot|"
     r"ma'lumot|mavjud|kerakmi|bormi|qiladi|qilinadi|yoki|hamkor|biznes|"
     r"aloqa|kontakt|kredit|qarz|mfo|mmt|moliya|savol|javob|foydalanuvchi|"
-    r"kreditlar|kontaktlar|hamkorlarga|biznes|salom"
+    r"kreditlar|kontaktlar|hamkorlarga|biznes"
     r")\b",
     re.IGNORECASE,
 )
 
-ENGLISH_HINTS_RE = re.compile(
+UZ_CYRL_HINTS_RE = re.compile(
+    r"\b("
+    r"салом|ассалому|рахмат|илтимос|қандай|қайси|мумкин|керак|"
+    r"ариза|банклар|ҳамкорлар|мижоз|фоиз|муддат|шартлар|ҳужжат|"
+    r"тўлов|маълумот|мавжуд|алоқа|контакт|кредит|қарз|ммт|молия|"
+    r"жавоб|савол|фойдаланувчи|контактлар|кредитлар|ҳамкорларга|бизнес"
+    r")\b",
+    re.IGNORECASE,
+)
+
+EN_HINTS_RE = re.compile(
     r"\b("
     r"hello|hi|thanks|please|loan|credit|application|status|bank|banks|"
     r"partner|partners|insurance|leasing|how|what|where|when|can|do|does|"
     r"is|are|which|work|with|company|information|available|customer|"
-    r"business|contact|contacts|support|help|mortgage|car loan|microfinance"
-    r")\b",
-    re.IGNORECASE,
-)
-
-UZBEK_CYRILLIC_COMMON_RE = re.compile(
-    r"\b("
-    r"салом|рахмат|илтимос|қандай|қайси|керак|ариза|банклар|ҳамкорлар|"
-    r"мижоз|фоиз|муддат|шартлар|ҳужжат|алоқа|кредит|қарз|бизнес|ташкилот|"
-    r"маълумот|мавжуд|жавоб|савол|компания|суғурта|лизинг|ипотека|"
-    r"контактлар|кредитлар|ҳамкорларга|фойдаланувчи"
+    r"business|contact|contacts|support|help|mortgage|microfinance"
     r")\b",
     re.IGNORECASE,
 )
@@ -301,8 +294,8 @@ def detect_language(text: str) -> str:
     """
     Returns one of:
     - ru
-    - uz_cyrl
     - uz_latn
+    - uz_cyrl
     - en
     """
     lowered = text.lower().strip()
@@ -310,55 +303,39 @@ def detect_language(text: str) -> str:
     if not lowered:
         return "ru"
 
-    # Uzbek Cyrillic first
-    if UZBEK_CYRILLIC_SPECIFIC_RE.search(text):
+    if UZ_CYR_SPECIFIC_RE.search(text):
         return "uz_cyrl"
 
-    # Generic Cyrillic: Russian or Uzbek Cyrillic by vocabulary
-    if RUSSIAN_CYRILLIC_RE.search(text):
-        if UZBEK_CYRILLIC_COMMON_RE.search(lowered):
+    if ANY_CYR_RE.search(text):
+        if UZ_CYRL_HINTS_RE.search(lowered):
             return "uz_cyrl"
         return "ru"
 
-    # Latin: English vs Uzbek Latin
-    uzbek_score = len(UZBEK_LATIN_HINTS_RE.findall(lowered))
-    english_score = len(ENGLISH_HINTS_RE.findall(lowered))
+    uz_score = len(UZ_LATN_HINTS_RE.findall(lowered))
+    en_score = len(EN_HINTS_RE.findall(lowered))
 
-    if any(x in lowered for x in ["o'", "g'", "ya'ni", "yo'q"]):
-        uzbek_score += 3
+    if any(x in lowered for x in ["o'", "g'", "yo'q", "ya'ni"]):
+        uz_score += 3
 
-    if any(x in lowered for x in ["sh", "ch", "ng"]):
-        uzbek_score += 1
-
-    if english_score > uzbek_score:
+    if en_score > uz_score:
         return "en"
-    if uzbek_score > english_score:
+    if uz_score > en_score:
         return "uz_latn"
 
-    common_en = {"the", "what", "which", "hello", "hi", "bank", "banks", "contacts"}
-    if any(word in lowered.split() for word in common_en):
-        return "en"
-
     if LATIN_RE.search(text):
+        common_en = {"the", "what", "which", "hello", "hi", "bank", "banks", "contacts"}
+        if any(word in lowered.split() for word in common_en):
+            return "en"
         return "uz_latn"
 
     return "ru"
 
 
-def normalize_response_language(lang: str) -> str:
-    """
-    Force all Uzbek responses to Cyrillic.
-    """
-    if lang in {"uz_latn", "uz_cyrl", "uz"}:
-        return "uz_cyrl"
-    return lang
-
-
 def lang_name(lang: str) -> str:
     return {
         "ru": "Russian",
-        "uz_cyrl": "Uzbek written in Cyrillic script",
         "uz_latn": "Uzbek written in Latin script",
+        "uz_cyrl": "Uzbek written in Cyrillic script",
         "en": "English",
     }.get(lang, "Russian")
 
@@ -366,6 +343,7 @@ def lang_name(lang: str) -> str:
 def not_found_message(lang: str) -> str:
     messages = {
         "ru": "Я не нашёл точную информацию в базе знаний FINKO.",
+        "uz_latn": "FINKO bilimlar bazasida aniq ma'lumot topilmadi.",
         "uz_cyrl": "FINKO билимлар базасида аниқ маълумот топилмади.",
         "en": "I could not find exact information in the FINKO knowledge base.",
     }
@@ -375,6 +353,7 @@ def not_found_message(lang: str) -> str:
 def server_error_message(lang: str) -> str:
     messages = {
         "ru": "Произошла ошибка на сервере. Попробуйте чуть позже.",
+        "uz_latn": "Serverda xatolik yuz berdi. Iltimos, biroz keyinroq urinib ko'ring.",
         "uz_cyrl": "Серверда хатолик юз берди. Илтимос, бироз кейинроқ уриниб кўринг.",
         "en": "A server error occurred. Please try again a little later.",
     }
@@ -384,11 +363,11 @@ def server_error_message(lang: str) -> str:
 def quota_error_message(lang: str) -> str:
     messages = {
         "ru": "OpenAI API временно недоступен: проверьте квоту и billing.",
+        "uz_latn": "OpenAI API vaqtincha ishlamayapti: kvota va billingni tekshiring.",
         "uz_cyrl": "OpenAI API вақтинча ишламаяпти: квота ва billingни текширинг.",
         "en": "The OpenAI API is temporarily unavailable: please check quota and billing.",
     }
     return messages.get(lang, messages["ru"])
-
 
 # ============================================================
 # Intents / user types
@@ -428,8 +407,8 @@ def detect_intent(user_text: str) -> str:
         return "restart"
 
     if text in {
-        "kontakti", "contacts", "contact", "контакты", "контакт", "/contacts",
-        "контактлар", "алоқа"
+        "kontakti", "kontaktlar", "contacts", "contact",
+        "контакты", "контакт", "контактлар", "алоқа", "/contacts"
     }:
         return "contacts"
 
@@ -446,7 +425,7 @@ def detect_intent(user_text: str) -> str:
 
     if text in {
         "партнёры", "партнеры", "партнёрам", "партнерам",
-        "hamkorlarga", "partners", "partner", "/partners",
+        "hamkorlar", "hamkorlarga", "partners", "partner", "/partners",
         "ҳамкорлар", "ҳамкорларга"
     }:
         return "partners_menu"
@@ -510,7 +489,6 @@ def infer_user_type(intent: str, user_text: str) -> str:
 
     return "customer"
 
-
 # ============================================================
 # Telegram UI
 # ============================================================
@@ -524,6 +502,14 @@ def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
             "restart": "Restart",
             "contacts": "Контакты",
             "placeholder": "Напишите вопрос...",
+        },
+        "uz_latn": {
+            "credits": "Kreditlar",
+            "business": "Biznes",
+            "partners": "Hamkorlar",
+            "restart": "Restart",
+            "contacts": "Kontaktlar",
+            "placeholder": "Savolingizni yozing...",
         },
         "uz_cyrl": {
             "credits": "Кредитлар",
@@ -590,7 +576,6 @@ def extract_user_message(update: dict[str, Any]) -> tuple[int | None, str | None
 
     return chat_id, text.strip(), profile
 
-
 # ============================================================
 # Quick answers without OpenAI
 # ============================================================
@@ -599,6 +584,7 @@ def build_quick_answer(action: str, lang: str) -> str:
     answers = {
         "restart": {
             "ru": "Бот перезапущен. Можете отправить новый вопрос.",
+            "uz_latn": "Bot qayta ishga tushdi. Yangi savol yuborishingiz mumkin.",
             "uz_cyrl": "Бот қайта ишга тушди. Янги савол юборишингиз мумкин.",
             "en": "The bot has been restarted. You can send a new question.",
         },
@@ -609,6 +595,13 @@ def build_quick_answer(action: str, lang: str) -> str:
                 "Email: info@finko.uz\n"
                 "Сайт: https://finko.uz\n"
                 "Офис: Ташкент, ул. Ойбек 18/1, БЦ ATRIUM"
+            ),
+            "uz_latn": (
+                "FINKO kontaktlari:\n"
+                "Telefon: +998 50 177 77 88\n"
+                "Email: info@finko.uz\n"
+                "Sayt: https://finko.uz\n"
+                "Ofis: Toshkent, Oybek 18/1, ATRIUM"
             ),
             "uz_cyrl": (
                 "FINKO контактлари:\n"
@@ -631,6 +624,11 @@ def build_quick_answer(action: str, lang: str) -> str:
                 "микрозаймы и другие финансовые продукты. Условия по сумме, сроку и ставке "
                 "определяются банком или МФО-партнёром. FINKO не выдаёт кредиты напрямую."
             ),
+            "uz_latn": (
+                "FINKO orqali iste'mol kreditlari, avtokreditlar, ipoteka, mikrozaymlar "
+                "va boshqa moliyaviy mahsulotlar mavjud. Summa, muddat va stavka hamkor bank "
+                "yoki MMT tomonidan belgilanadi. FINKO kreditni to'g'ridan-to'g'ri bermaydi."
+            ),
             "uz_cyrl": (
                 "FINKO орқали истеъмол кредитлари, автокредитлар, ипотека, микрозаймлар "
                 "ва бошқа молиявий маҳсулотлар мавжуд. Сумма, муддат ва ставка ҳамкор банк "
@@ -647,6 +645,11 @@ def build_quick_answer(action: str, lang: str) -> str:
                 "Для бизнеса через FINKO доступны бизнес-кредиты, оборотные и инвестиционные "
                 "кредиты, лизинг, страхование и другие решения. Итоговые условия определяются "
                 "партнёрской организацией."
+            ),
+            "uz_latn": (
+                "Biznes uchun FINKO orqali biznes kreditlari, aylanma va investitsiya "
+                "kreditlari, lizing, sug'urta va boshqa yechimlar mavjud. Yakuniy shartlar "
+                "hamkor tashkilot tomonidan belgilanadi."
             ),
             "uz_cyrl": (
                 "Бизнес учун FINKO орқали бизнес кредитлари, айланма ва инвестиция "
@@ -665,6 +668,11 @@ def build_quick_answer(action: str, lang: str) -> str:
                 "а также с МФО DELTA, PULMAN, APEX MOLIYA, ANSOR и ALMIZAN. Количество партнёрских "
                 "организаций постоянно увеличивается."
             ),
+            "uz_latn": (
+                "FINKO Hamkorbank, Universal Bank, Davr-Bank va Madad Invest Bank bilan, "
+                "shuningdek DELTA, PULMAN, APEX MOLIYA, ANSOR va ALMIZAN kabi MMTlar bilan "
+                "hamkorlik qiladi. Hamkor tashkilotlar soni doimiy ravishda oshib bormoqda."
+            ),
             "uz_cyrl": (
                 "FINKO Hamkorbank, Universal Bank, Davr-Bank ва Madad Invest Bank билан, "
                 "шунингдек DELTA, PULMAN, APEX MOLIYA, ANSOR ва ALMIZAN каби ММТлар билан "
@@ -678,11 +686,13 @@ def build_quick_answer(action: str, lang: str) -> str:
         },
         "greeting": {
             "ru": "Здравствуйте! Я AI-ассистент FINKO. Могу помочь с продуктами, бизнес-вопросами, партнёрством и контактами.",
+            "uz_latn": "Salom! Men FINKO AI yordamchisiman. Mahsulotlar, biznes savollari, hamkorlik va kontaktlar bo'yicha yordam bera olaman.",
             "uz_cyrl": "Салом! Мен FINKO AI ёрдамчисиман. Маҳсулотлар, бизнес саволлари, ҳамкорлик ва контактлар бўйича ёрдам бера оламан.",
             "en": "Hello! I’m the FINKO AI assistant. I can help with products, business questions, partnerships, and contacts.",
         },
         "thanks": {
             "ru": "Пожалуйста! Если захотите, можете задать ещё один вопрос.",
+            "uz_latn": "Marhamat! Xohlasangiz, yana savol yuborishingiz mumkin.",
             "uz_cyrl": "Марҳамат! Хоҳласангиз, яна савол юборишингиз мумкин.",
             "en": "You’re welcome! Feel free to send another question.",
         },
@@ -710,8 +720,7 @@ def should_use_quick_reply(intent: str, user_text: str) -> bool:
 
 
 def handle_menu_or_quick_action(user_text: str, chat_id: int) -> tuple[str | None, str | None]:
-    input_lang = detect_language(user_text)
-    response_lang = normalize_response_language(input_lang)
+    lang = detect_language(user_text)
     intent = detect_intent(user_text)
 
     if not should_use_quick_reply(intent, user_text):
@@ -729,9 +738,8 @@ def handle_menu_or_quick_action(user_text: str, chat_id: int) -> tuple[str | Non
     elif intent == "partners":
         quick_intent = "partners_menu"
 
-    answer = build_quick_answer(quick_intent, response_lang)
+    answer = build_quick_answer(quick_intent, lang)
     return answer or None, intent
-
 
 # ============================================================
 # KB search
@@ -763,7 +771,7 @@ def preferred_search_languages(input_lang: str) -> list[str]:
         return ["uz_latn", "uz_cyrl", "ru", "en"]
     if input_lang == "ru":
         return ["ru", "uz_cyrl", "uz_latn", "en"]
-    return ["en", "ru", "uz_cyrl", "uz_latn"]
+    return ["en", "ru", "uz_latn", "uz_cyrl"]
 
 
 def build_search_queries(user_text: str, detected_lang: str, intent: str) -> list[str]:
@@ -777,7 +785,7 @@ def build_search_queries(user_text: str, detected_lang: str, intent: str) -> lis
                 "Hamkorbank Universal Bank Davr-Bank Madad Invest Bank",
                 "МФО партнеры FINKO DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN",
             ])
-        elif detected_lang in {"uz_cyrl", "uz_latn"}:
+        elif detected_lang in {"uz_latn", "uz_cyrl"}:
             queries.extend([
                 "FINKO hamkor banklar",
                 "Hamkorbank Universal Bank Davr-Bank Madad Invest Bank",
@@ -798,7 +806,7 @@ def build_search_queries(user_text: str, detected_lang: str, intent: str) -> lis
                 "бизнес кредиты FINKO",
                 "лизинг страхование бизнес FINKO",
             ])
-        elif detected_lang in {"uz_cyrl", "uz_latn"}:
+        elif detected_lang in {"uz_latn", "uz_cyrl"}:
             queries.extend([
                 "FINKO biznes kreditlari",
                 "lizing sug'urta biznes FINKO",
@@ -817,7 +825,7 @@ def build_search_queries(user_text: str, detected_lang: str, intent: str) -> lis
                 "кредиты FINKO",
                 "ипотека автокредит микрозаймы FINKO",
             ])
-        elif detected_lang in {"uz_cyrl", "uz_latn"}:
+        elif detected_lang in {"uz_latn", "uz_cyrl"}:
             queries.extend([
                 "FINKO kreditlar",
                 "ipoteka avtokredit mikrozaym FINKO",
@@ -835,7 +843,7 @@ def build_search_queries(user_text: str, detected_lang: str, intent: str) -> lis
             queries.append("банки партнеры FINKO")
         elif "мфо" in lowered or "микрофинансов" in lowered:
             queries.append("МФО партнеры FINKO")
-    elif detected_lang in {"uz_cyrl", "uz_latn"}:
+    elif detected_lang in {"uz_latn", "uz_cyrl"}:
         if (
             "qaysi banklar" in lowered
             or "banklar bilan" in lowered
@@ -953,7 +961,6 @@ def search_knowledge_base(user_text: str, preferred_lang: str, intent: str) -> s
 
     return "\n\n---\n\n".join(merged_chunks)
 
-
 # ============================================================
 # Repetition control
 # ============================================================
@@ -1001,7 +1008,6 @@ def reduce_repetition_if_needed(chat_id: int, answer: str) -> str:
 
     return answer
 
-
 # ============================================================
 # Prompting / LLM
 # ============================================================
@@ -1017,7 +1023,8 @@ CRITICAL LANGUAGE RULE:
 - Ignore the language of previous assistant replies.
 - Never continue in a previous language unless the latest user message is in that language.
 - Never mix Russian, Uzbek, and English in one reply unless the user explicitly asks for translation.
-- If the language is Uzbek, write Uzbek ONLY in Cyrillic script.
+- If the language is Uzbek written in Latin script, answer Uzbek in Latin script only.
+- If the language is Uzbek written in Cyrillic script, answer Uzbek in Cyrillic script only.
 
 USER TYPE:
 - Detected user type: {user_type}.
@@ -1048,8 +1055,7 @@ def build_user_prompt(
     repeated_question: bool,
 ) -> str:
     repeat_instruction = (
-        "The user is asking a repeated or very similar question. "
-        "Answer more briefly than before and avoid repeating wording."
+        "The user is asking a repeated or very similar question. Answer more briefly than before and avoid repeating wording."
         if repeated_question
         else "Answer normally, but stay concise."
     )
@@ -1082,12 +1088,11 @@ Requirements:
 
 
 def generate_answer(chat_id: int, user_text: str, intent: str, user_type: str) -> str:
-    input_lang = detect_language(user_text)
-    response_lang = normalize_response_language(input_lang)
+    response_lang = detect_language(user_text)
 
     kb_context = search_knowledge_base(
         user_text=user_text,
-        preferred_lang=input_lang,
+        preferred_lang=response_lang,
         intent=intent,
     )
 
@@ -1129,7 +1134,6 @@ def generate_answer(chat_id: int, user_text: str, intent: str, user_type: str) -
     except Exception as e:
         logger.exception("OpenAI answer generation failed: %s", e)
         return server_error_message(response_lang)
-
 
 # ============================================================
 # Analytics endpoints
@@ -1279,7 +1283,6 @@ async def analytics_top_users(
         ]
     }
 
-
 # ============================================================
 # Webhook
 # ============================================================
@@ -1314,8 +1317,7 @@ async def telegram_webhook(
     if not chat_id or not user_text:
         return JSONResponse({"ok": True, "skipped": True})
 
-    input_lang = detect_language(user_text)
-    response_lang = normalize_response_language(input_lang)
+    detected_lang = detect_language(user_text)
     intent = detect_intent(user_text)
     user_type = infer_user_type(intent, user_text)
 
@@ -1324,7 +1326,7 @@ async def telegram_webhook(
         username=profile.get("username"),
         first_name=profile.get("first_name"),
         last_name=profile.get("last_name"),
-        language=response_lang,
+        language=detected_lang,
         user_type=user_type,
     )
 
@@ -1332,7 +1334,7 @@ async def telegram_webhook(
         chat_id=chat_id,
         direction="inbound",
         text=user_text,
-        language=input_lang,
+        language=detected_lang,
         intent=intent,
         user_type=user_type,
         source="telegram",
@@ -1340,14 +1342,14 @@ async def telegram_webhook(
 
     quick_answer, quick_intent = handle_menu_or_quick_action(user_text, chat_id)
     if quick_answer:
-        await send_telegram_message(chat_id, quick_answer, ui_lang=response_lang)
+        await send_telegram_message(chat_id, quick_answer, ui_lang=detected_lang)
         save_assistant_message(chat_id, quick_answer)
 
         log_message(
             chat_id=chat_id,
             direction="outbound",
             text=quick_answer,
-            language=response_lang,
+            language=detected_lang,
             intent=quick_intent,
             user_type=user_type,
             source="quick",
@@ -1365,14 +1367,14 @@ async def telegram_webhook(
             user_type=user_type,
         )
 
-        await send_telegram_message(chat_id, answer, ui_lang=response_lang)
+        await send_telegram_message(chat_id, answer, ui_lang=detected_lang)
         save_assistant_message(chat_id, answer)
 
         log_message(
             chat_id=chat_id,
             direction="outbound",
             text=answer,
-            language=response_lang,
+            language=detected_lang,
             intent=intent,
             user_type=user_type,
             source="openai",
@@ -1382,8 +1384,7 @@ async def telegram_webhook(
         return JSONResponse(
             {
                 "ok": True,
-                "input_language": input_lang,
-                "response_language": response_lang,
+                "language": detected_lang,
                 "intent": intent,
                 "user_type": user_type,
                 "source": "openai",
@@ -1396,15 +1397,15 @@ async def telegram_webhook(
 
     except Exception as e:
         logger.exception("Unhandled error: %s", e)
-        fallback_text = server_error_message(response_lang)
+        fallback_text = server_error_message(detected_lang)
 
         try:
-            await send_telegram_message(chat_id, fallback_text, ui_lang=response_lang)
+            await send_telegram_message(chat_id, fallback_text, ui_lang=detected_lang)
             log_message(
                 chat_id=chat_id,
                 direction="outbound",
                 text=fallback_text,
-                language=response_lang,
+                language=detected_lang,
                 intent=intent,
                 user_type=user_type,
                 source="fallback",
