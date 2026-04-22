@@ -54,7 +54,7 @@ if not OPENAI_VECTOR_STORE_ID:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="Telegram AI Bot", version="4.3.0")
+app = FastAPI(title="Telegram AI Bot", version="4.4.0")
 
 # ============================================================
 # In-memory state
@@ -146,7 +146,6 @@ def init_db() -> None:
                 """
             )
 
-            # Safe migration for interface language
             ensure_column_exists(conn, "users", "selected_language", "TEXT")
 
 
@@ -314,18 +313,20 @@ UZ_LATN_HINTS_RE = re.compile(
     r"ariza|banklar|hamkorlar|mijoz|foiz|muddat|shartlar|tasdiq|rad|hujjat|"
     r"to'lov|o'zbek|uzbek|qaysi|bilan|ishlaysiz|kompaniya|tashkilot|"
     r"ma'lumot|mavjud|kerakmi|bormi|qiladi|qilinadi|yoki|hamkor|biznes|"
-    r"aloqa|kontakt|kredit|qarz|mfo|mmt|moliya|savol|javob|foydalanuvchi|"
+    r"aloqa|kontakt|qarz|mfo|mmt|moliya|savol|javob|foydalanuvchi|"
     r"kreditlar|kontaktlar|hamkorlarga|hamkorlar"
     r")\b",
     re.IGNORECASE,
 )
 
-UZ_CYRL_HINTS_RE = re.compile(
+# Только по-настоящему узбекские кириллические слова.
+# Без общих слов типа "кредит", "бизнес", "контакт".
+UZ_CYRL_STRONG_HINTS_RE = re.compile(
     r"\b("
     r"салом|ассалому|рахмат|илтимос|қандай|қайси|мумкин|керак|"
     r"ариза|банклар|ҳамкорлар|мижоз|фоиз|муддат|шартлар|ҳужжат|"
-    r"тўлов|маълумот|мавжуд|алоқа|контакт|кредит|қарз|ммт|молия|"
-    r"жавоб|савол|фойдаланувчи|контактлар|кредитлар|ҳамкорларга|ҳамкорлар|бизнес"
+    r"тўлов|маълумот|мавжуд|алоқа|қарз|ммт|жавоб|савол|"
+    r"фойдаланувчи|ҳамкорларга"
     r")\b",
     re.IGNORECASE,
 )
@@ -354,11 +355,14 @@ def detect_language(text: str) -> str:
     if not lowered:
         return "ru"
 
+    # Самый надёжный признак узбекской кириллицы
     if UZ_CYR_SPECIFIC_RE.search(text):
         return "uz_cyrl"
 
+    # Любая кириллица без узбекских спецбукв:
+    # считаем русским, если нет сильных узбекских кириллических маркеров
     if ANY_CYR_RE.search(text):
-        if UZ_CYRL_HINTS_RE.search(lowered):
+        if UZ_CYRL_STRONG_HINTS_RE.search(lowered):
             return "uz_cyrl"
         return "ru"
 
@@ -848,7 +852,6 @@ def handle_menu_or_quick_action(
     elif intent == "partners":
         quick_intent = "partners_menu"
 
-    # Для кнопок и быстрых ответов используем ЯЗЫК ИНТЕРФЕЙСА, а не detect_language(user_text)
     answer = build_quick_answer(quick_intent, ui_lang)
     return answer or None, intent
 
@@ -934,18 +937,22 @@ def build_search_queries(user_text: str, detected_lang: str, intent: str) -> lis
         if detected_lang == "ru":
             queries.extend([
                 "кредиты FINKO",
+                "оформить заявку кредит FINKO",
+                "как подать заявку на кредит FINKO",
                 "ипотека автокредит микрозаймы FINKO",
             ])
         elif detected_lang in {"uz_latn", "uz_cyrl"}:
             queries.extend([
                 "FINKO kreditlar",
-                "ipoteka avtokredit mikrozaym FINKO",
+                "kredit uchun ariza topshirish FINKO",
                 "FINKO кредитлар",
-                "ипотека автокредит микрозайм FINKO",
+                "кредит учун ариза топшириш FINKO",
+                "ipoteka avtokredit mikrozaym FINKO",
             ])
         else:
             queries.extend([
                 "FINKO credits",
+                "how to apply for a loan on FINKO",
                 "mortgage auto loan microloans FINKO",
             ])
 
@@ -954,6 +961,8 @@ def build_search_queries(user_text: str, detected_lang: str, intent: str) -> lis
             queries.append("банки партнеры FINKO")
         elif "мфо" in lowered or "микрофинансов" in lowered:
             queries.append("МФО партнеры FINKO")
+        elif "заявк" in lowered and "кредит" in lowered:
+            queries.extend(["как подать заявку на кредит FINKO", "оформить заявку кредит FINKO"])
     elif detected_lang in {"uz_latn", "uz_cyrl"}:
         if (
             "qaysi banklar" in lowered
@@ -969,11 +978,18 @@ def build_search_queries(user_text: str, detected_lang: str, intent: str) -> lis
             or "микромолиявий" in lowered
         ):
             queries.extend(["FINKO hamkor MMTlar", "FINKO ҳамкор ММТлар"])
+        elif (
+            ("ariza" in lowered and "kredit" in lowered)
+            or ("ариза" in lowered and "кредит" in lowered)
+        ):
+            queries.extend(["kredit uchun ariza topshirish FINKO", "кредит учун ариза топшириш FINKO"])
     elif detected_lang == "en":
         if "which banks" in lowered or "banks do you work with" in lowered:
             queries.append("FINKO partner banks")
         elif "mfo" in lowered or "microfinance" in lowered:
             queries.append("FINKO partner MFOs")
+        elif "apply" in lowered and "credit" in lowered:
+            queries.append("how to apply for a loan on FINKO")
 
     unique: list[str] = []
     seen: set[str] = set()
@@ -983,7 +999,7 @@ def build_search_queries(user_text: str, detected_lang: str, intent: str) -> lis
             seen.add(key)
             unique.append(query)
 
-    return unique[:7]
+    return unique[:8]
 
 
 def search_once(query: str, preferred_lang: str) -> list[str]:
@@ -1429,7 +1445,6 @@ async def telegram_webhook(
     if not chat_id or not user_text:
         return JSONResponse({"ok": True, "skipped": True})
 
-    # /start => ask for UI language
     if user_text == "/start":
         await send_telegram_message(
             chat_id,
@@ -1440,7 +1455,6 @@ async def telegram_webhook(
         log_event(chat_id, "start_shown", "language_selector")
         return JSONResponse({"ok": True, "source": "start_language_selector"})
 
-    # explicit UI language selection
     selected_lang = handle_language_selection(user_text)
     if selected_lang:
         upsert_user_profile(
@@ -1498,7 +1512,7 @@ async def telegram_webhook(
             chat_id=chat_id,
             direction="outbound",
             text=quick_answer,
-            language=message_lang,
+            language=ui_lang,
             intent=quick_intent,
             user_type=user_type,
             source="quick",
