@@ -8,11 +8,13 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import io
+import csv
 
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from openai import OpenAI, RateLimitError
 
 # ============================================================
@@ -54,7 +56,7 @@ if not OPENAI_VECTOR_STORE_ID:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="Telegram AI Bot", version="4.4.0")
+app = FastAPI(title="Telegram AI Bot", version="4.4.1")
 
 # ============================================================
 # In-memory state
@@ -319,8 +321,6 @@ UZ_LATN_HINTS_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Только по-настоящему узбекские кириллические слова.
-# Без общих слов типа "кредит", "бизнес", "контакт".
 UZ_CYRL_STRONG_HINTS_RE = re.compile(
     r"\b("
     r"салом|ассалому|рахмат|илтимос|қандай|қайси|мумкин|керак|"
@@ -343,24 +343,14 @@ EN_HINTS_RE = re.compile(
 
 
 def detect_language(text: str) -> str:
-    """
-    Returns one of:
-    - ru
-    - uz_latn
-    - uz_cyrl
-    - en
-    """
     lowered = text.lower().strip()
 
     if not lowered:
         return "ru"
 
-    # Самый надёжный признак узбекской кириллицы
     if UZ_CYR_SPECIFIC_RE.search(text):
         return "uz_cyrl"
 
-    # Любая кириллица без узбекских спецбукв:
-    # считаем русским, если нет сильных узбекских кириллических маркеров
     if ANY_CYR_RE.search(text):
         if UZ_CYRL_STRONG_HINTS_RE.search(lowered):
             return "uz_cyrl"
@@ -1272,7 +1262,27 @@ def verify_admin_token(x_admin_token: str | None) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="ADMIN_ANALYTICS_TOKEN is not configured",
         )
+
     if x_admin_token != ADMIN_ANALYTICS_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid admin token",
+        )
+
+
+def verify_admin_token_flexible(
+    header_token: str | None,
+    query_token: str | None,
+) -> None:
+    token = header_token or query_token
+
+    if not ADMIN_ANALYTICS_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ADMIN_ANALYTICS_TOKEN is not configured",
+        )
+
+    if token != ADMIN_ANALYTICS_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid admin token",
@@ -1387,7 +1397,15 @@ async def analytics_top_users(
         with get_db() as conn:
             rows = conn.execute(
                 """
-                SELECT chat_id, username, first_name, last_name, messages_count, user_type, last_language, selected_language
+                SELECT
+                    chat_id,
+                    username,
+                    first_name,
+                    last_name,
+                    messages_count,
+                    user_type,
+                    last_language,
+                    selected_language
                 FROM users
                 ORDER BY messages_count DESC
                 LIMIT ?
@@ -1411,6 +1429,124 @@ async def analytics_top_users(
         ]
     }
 
+
+@app.get("/analytics/recent-messages")
+async def analytics_recent_messages(
+    limit: int = Query(default=50, ge=1, le=200),
+    x_admin_token: str | None = Header(default=None),
+):
+    verify_admin_token(x_admin_token)
+
+    with db_lock:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    m.chat_id,
+                    u.username,
+                    u.first_name,
+                    u.last_name,
+                    m.direction,
+                    m.text,
+                    m.language,
+                    m.intent,
+                    m.source,
+                    m.created_at
+                FROM messages m
+                LEFT JOIN users u ON u.chat_id = m.chat_id
+                ORDER BY m.created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+    return {
+        "recent_messages": [
+            {
+                "chat_id": row["chat_id"],
+                "username": row["username"],
+                "first_name": row["first_name"],
+                "last_name": row["last_name"],
+                "direction": row["direction"],
+                "text": row["text"],
+                "language": row["language"],
+                "intent": row["intent"],
+                "source": row["source"],
+                "created_at": row["created_at"],
+            }
+            for row in rows
+        ]
+    }
+
+
+@app.get("/analytics/export/messages.csv")
+async def analytics_export_messages_csv(
+    x_admin_token: str | None = Header(default=None),
+    x_admin_token_query: str | None = Query(default=None, alias="x_admin_token"),
+):
+    verify_admin_token_flexible(x_admin_token, x_admin_token_query)
+
+    with db_lock:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    m.chat_id,
+                    u.username,
+                    u.first_name,
+                    u.last_name,
+                    m.direction,
+                    m.text,
+                    m.language,
+                    m.intent,
+                    m.source,
+                    m.created_at
+                FROM messages m
+                LEFT JOIN users u ON u.chat_id = m.chat_id
+                ORDER BY m.created_at DESC
+                """
+            ).fetchall()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "chat_id",
+        "username",
+        "first_name",
+        "last_name",
+        "direction",
+        "text",
+        "language",
+        "intent",
+        "source",
+        "created_at",
+    ])
+
+    for row in rows:
+        writer.writerow([
+            row["chat_id"],
+            row["username"],
+            row["first_name"],
+            row["last_name"],
+            row["direction"],
+            row["text"],
+            row["language"],
+            row["intent"],
+            row["source"],
+            row["created_at"],
+        ])
+
+    output.seek(0)
+
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": "attachment; filename=bot_messages_analytics.csv"
+        },
+    )
+
+
 @app.get("/analytics/dashboard", response_class=HTMLResponse)
 async def analytics_dashboard():
     return """
@@ -1429,7 +1565,7 @@ async def analytics_dashboard():
                 color: #e2e8f0;
             }
             .wrap {
-                max-width: 1200px;
+                max-width: 1400px;
                 margin: 0 auto;
                 padding: 24px;
             }
@@ -1453,7 +1589,7 @@ async def analytics_dashboard():
                 color: white;
                 outline: none;
             }
-            button {
+            button, a.btn {
                 padding: 12px 18px;
                 border: none;
                 border-radius: 10px;
@@ -1461,8 +1597,12 @@ async def analytics_dashboard():
                 color: white;
                 cursor: pointer;
                 font-weight: 600;
+                text-decoration: none;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
             }
-            button:hover {
+            button:hover, a.btn:hover {
                 background: #1d4ed8;
             }
             .grid {
@@ -1509,11 +1649,11 @@ async def analytics_dashboard():
                 border-bottom: 1px solid #1f2937;
                 text-align: left;
                 vertical-align: top;
+                font-size: 14px;
             }
             th {
                 background: #0b1220;
                 color: #93c5fd;
-                font-size: 14px;
             }
             tr:last-child td {
                 border-bottom: none;
@@ -1551,6 +1691,11 @@ async def analytics_dashboard():
                 font-size: 13px;
                 color: #94a3b8;
             }
+            .message-cell {
+                max-width: 520px;
+                white-space: pre-wrap;
+                word-break: break-word;
+            }
         </style>
     </head>
     <body>
@@ -1564,13 +1709,16 @@ async def analytics_dashboard():
                     placeholder="Вставь ADMIN_ANALYTICS_TOKEN"
                 />
                 <button onclick="loadAnalytics()">Загрузить аналитику</button>
+                <a href="#" class="btn" onclick="downloadCsv(event)">Скачать CSV</a>
             </div>
 
             <div class="muted">
-                Эта страница использует твои текущие endpoints:
-                <span class="badge">/analytics/summary</span>
-                <span class="badge">/analytics/top-questions</span>
-                <span class="badge">/analytics/top-users</span>
+                Доступно:
+                <span class="badge">summary</span>
+                <span class="badge">top questions</span>
+                <span class="badge">top users</span>
+                <span class="badge">recent messages</span>
+                <span class="badge">csv export</span>
             </div>
 
             <div id="okBox" class="ok"></div>
@@ -1664,6 +1812,26 @@ async def analytics_dashboard():
                     <tbody id="usersTable"></tbody>
                 </table>
             </div>
+
+            <div class="section">
+                <h2>Кто что написал</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Дата и время</th>
+                            <th>Chat ID</th>
+                            <th>Username</th>
+                            <th>Имя</th>
+                            <th>Direction</th>
+                            <th>Язык</th>
+                            <th>Intent</th>
+                            <th>Источник</th>
+                            <th>Сообщение</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentMessagesTable"></tbody>
+                </table>
+            </div>
         </div>
 
         <script>
@@ -1687,6 +1855,7 @@ async def analytics_dashboard():
                 document.getElementById("userTypesTable").innerHTML = "";
                 document.getElementById("questionsTable").innerHTML = "";
                 document.getElementById("usersTable").innerHTML = "";
+                document.getElementById("recentMessagesTable").innerHTML = "";
             }
 
             function renderKeyValueRows(targetId, items) {
@@ -1736,15 +1905,45 @@ async def analytics_dashboard():
                 }
 
                 items.forEach(item => {
+                    const fullName = ((item.first_name || "") + " " + (item.last_name || "")).trim();
+
                     const row = document.createElement("tr");
                     row.innerHTML = `
                         <td>${item.chat_id ?? ""}</td>
                         <td>${item.username ?? ""}</td>
-                        <td>${(item.first_name ?? "") + " " + (item.last_name ?? "")}</td>
+                        <td>${fullName}</td>
                         <td>${item.messages_count ?? 0}</td>
                         <td>${item.user_type ?? ""}</td>
                         <td>${item.last_language ?? ""}</td>
                         <td>${item.selected_language ?? ""}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            }
+
+            function renderRecentMessages(items) {
+                const tbody = document.getElementById("recentMessagesTable");
+                tbody.innerHTML = "";
+
+                if (!items || items.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="9" class="small">Нет данных</td></tr>';
+                    return;
+                }
+
+                items.forEach(item => {
+                    const fullName = ((item.first_name || "") + " " + (item.last_name || "")).trim();
+
+                    const row = document.createElement("tr");
+                    row.innerHTML = `
+                        <td>${item.created_at ?? ""}</td>
+                        <td>${item.chat_id ?? ""}</td>
+                        <td>${item.username ?? ""}</td>
+                        <td>${fullName}</td>
+                        <td>${item.direction ?? ""}</td>
+                        <td>${item.language ?? ""}</td>
+                        <td>${item.intent ?? ""}</td>
+                        <td>${item.source ?? ""}</td>
+                        <td class="message-cell">${item.text ?? ""}</td>
                     `;
                     tbody.appendChild(row);
                 });
@@ -1758,7 +1957,7 @@ async def analytics_dashboard():
                 });
 
                 if (!response.ok) {
-                    let text = await response.text();
+                    const text = await response.text();
                     throw new Error(`HTTP ${response.status}: ${text}`);
                 }
 
@@ -1776,10 +1975,11 @@ async def analytics_dashboard():
                 clearTables();
 
                 try {
-                    const [summary, questions, users] = await Promise.all([
+                    const [summary, questions, users, recentMessages] = await Promise.all([
                         fetchJson("/analytics/summary", token),
                         fetchJson("/analytics/top-questions?limit=15", token),
                         fetchJson("/analytics/top-users?limit=15", token),
+                        fetchJson("/analytics/recent-messages?limit=100", token),
                     ]);
 
                     document.getElementById("usersCount").textContent = summary.users_count ?? 0;
@@ -1792,11 +1992,25 @@ async def analytics_dashboard():
                     renderKeyValueRows("userTypesTable", summary.user_types || []);
                     renderQuestions(questions.top_questions || []);
                     renderUsers(users.top_users || []);
+                    renderRecentMessages(recentMessages.recent_messages || []);
 
                     showOk("Аналитика успешно загружена.");
                 } catch (error) {
                     showError("Не удалось загрузить аналитику: " + error.message);
                 }
+            }
+
+            function downloadCsv(event) {
+                event.preventDefault();
+
+                const token = document.getElementById("tokenInput").value.trim();
+
+                if (!token) {
+                    showError("Сначала вставь ADMIN_ANALYTICS_TOKEN.");
+                    return;
+                }
+
+                window.location.href = `/analytics/export/messages.csv?x_admin_token=${encodeURIComponent(token)}`;
             }
         </script>
     </body>
