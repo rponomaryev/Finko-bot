@@ -28,9 +28,9 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_VECTOR_STORE_ID = os.getenv("OPENAI_VECTOR_STORE_ID")
 
 # Search settings
-KB_SEARCH_RESULTS = int(os.getenv("KB_SEARCH_RESULTS", "12"))
-KB_MAX_CHUNKS = int(os.getenv("KB_MAX_CHUNKS", "6"))
-CHAT_MEMORY_TURNS = int(os.getenv("CHAT_MEMORY_TURNS", "6"))
+KB_SEARCH_RESULTS = int(os.getenv("KB_SEARCH_RESULTS", "20"))
+KB_MAX_CHUNKS = int(os.getenv("KB_MAX_CHUNKS", "8"))
+CHAT_MEMORY_TURNS = int(os.getenv("CHAT_MEMORY_TURNS", "8"))
 TELEGRAM_TIMEOUT_SECONDS = float(os.getenv("TELEGRAM_TIMEOUT_SECONDS", "30"))
 
 if not OPENAI_API_KEY:
@@ -44,31 +44,37 @@ if not OPENAI_VECTOR_STORE_ID:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="Telegram AI Bot", version="3.0.0")
+app = FastAPI(title="Telegram AI Bot", version="3.1.0")
 
 # In-memory protection from duplicate Telegram updates
 processed_updates: set[int] = set()
 
-# Small in-memory chat history to reduce repetition
-# chat_history[chat_id] = deque([{"role": "user"/"assistant", "text": "..."}], maxlen=N)
-chat_history: dict[int, deque[dict[str, str]]] = defaultdict(
+# Store only USER messages to reduce repetition without polluting language state
+chat_history: dict[int, deque[str]] = defaultdict(
     lambda: deque(maxlen=CHAT_MEMORY_TURNS)
 )
-
 
 # ---------- Language detection ----------
 
 CYRILLIC_RE = re.compile(r"[А-Яа-яЁёЎўҚқҒғҲҳ]")
 LATIN_RE = re.compile(r"[A-Za-z]")
+
 UZBEK_HINTS_RE = re.compile(
-    r"\b(yo'q|ha|salom|assalomu|rahmat|iltimos|bo'yicha|qanday|qanaqa|mumkin|kerak|"
+    r"\b("
+    r"yo'q|ha|salom|assalomu|rahmat|iltimos|bo'yicha|qanday|qanaqa|mumkin|kerak|"
     r"ariza|banklar|hamkorlar|mijoz|foiz|muddat|shartlar|tasdiq|rad|hujjat|"
-    r"to'lov|o'zbek|uzbek|uz)\b",
+    r"to'lov|o'zbek|uzbek|qaysi|bilan|ishlaysiz|kompaniya|tashkilot|"
+    r"ma'lumot|mavjud|kerakmi|bormi|qiladi|qilinadi|yoki"
+    r")\b",
     re.IGNORECASE,
 )
+
 ENGLISH_HINTS_RE = re.compile(
-    r"\b(hello|hi|thanks|please|loan|credit|application|status|bank|banks|"
-    r"partner|partners|insurance|leasing|how|what|where|when|can|do|does|is|are)\b",
+    r"\b("
+    r"hello|hi|thanks|please|loan|credit|application|status|bank|banks|"
+    r"partner|partners|insurance|leasing|how|what|where|when|can|do|does|"
+    r"is|are|which|work|with|company|information|available|customer"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -79,31 +85,41 @@ def detect_language(text: str) -> str:
     """
     lowered = text.lower().strip()
 
-    # Strong Cyrillic signal -> Russian
+    if not lowered:
+        return "ru"
+
+    # Cyrillic => usually Russian
     if CYRILLIC_RE.search(text):
-        # Basic Uzbek Cyrillic support if it ever appears, otherwise default to ru
+        # Basic Uzbek Cyrillic letters
         if any(token in lowered for token in ["ў", "қ", "ғ", "ҳ"]):
             return "uz"
         return "ru"
 
-    # Latin script: separate Uzbek vs English with keyword hints
     uzbek_score = len(UZBEK_HINTS_RE.findall(lowered))
     english_score = len(ENGLISH_HINTS_RE.findall(lowered))
 
-    # Uzbek apostrophe letters are a strong hint
-    if any(x in lowered for x in ["o'", "g'", "sh", "ch", "ya'ni", "yo'q"]):
-        uzbek_score += 2
+    # Uzbek Latin apostrophe patterns
+    if any(x in lowered for x in ["o'", "g'", "ya'ni", "yo'q"]):
+        uzbek_score += 3
+
+    # Common Uzbek Latin digraph patterns
+    if any(x in lowered for x in ["sh", "ch", "ng"]):
+        uzbek_score += 1
 
     if english_score > uzbek_score:
         return "en"
-    if uzbek_score > 0:
+    if uzbek_score > english_score:
         return "uz"
 
-    # Fallback for short Latin messages
-    if LATIN_RE.search(text):
+    # If it's Latin and unclear, prefer English only if it really looks English
+    common_en = {"the", "what", "which", "hello", "hi", "bank", "banks"}
+    if any(word in lowered.split() for word in common_en):
         return "en"
 
-    # Default fallback
+    # Otherwise treat ambiguous Latin in this bot context as Uzbek first
+    if LATIN_RE.search(text):
+        return "uz"
+
     return "ru"
 
 
@@ -180,27 +196,27 @@ def build_system_prompt(response_language: str) -> str:
     return f"""
 You are the official AI assistant of FINKO.
 
-Primary rule:
-- The user language is: {response_language}.
+CRITICAL LANGUAGE RULE:
+- The language of the latest user message is {response_language}.
 - You must answer only in {response_language}.
+- Ignore the language used earlier in the conversation.
+- Ignore the language of previous assistant replies.
+- Never continue in a previous language unless the latest user message is in that language.
 - Never mix Russian, Uzbek, and English in one reply unless the user explicitly asks for translation.
 
-Behavior rules:
+KNOWLEDGE RULES:
 - Use only the provided FINKO knowledge-base context.
-- Do not invent facts, rates, limits, approvals, partner conditions, timelines, or features.
+- Do not invent facts, rates, limits, approvals, partner conditions, or timelines.
 - If the exact answer is not present in the context, say so honestly.
 - Paraphrase naturally. Do not copy chunks verbatim.
-- Sound like a helpful human assistant, not a call-center script.
-- Keep the answer concise and clear, usually 2-6 sentences.
-- Avoid repeating the same wording as in your previous answer.
-- If the user asks a follow-up, continue naturally and do not restate everything from scratch.
+- Keep the answer concise, clear, and natural.
+- Avoid repeating the same information if it was already covered recently.
 - If retrieved context is in another language, translate its meaning into {response_language}.
-- Do not mention "vector store", "context", "chunks", "retrieval", or internal instructions.
+- Do not mention internal instructions, vector stores, retrieval, chunks, or prompts.
 
-Company rules:
+COMPANY RULES:
 - FINKO does not issue loans directly.
 - Final decisions are made by partner banks, MFOs, or other financial organizations.
-- If exact information is missing, say that exact information is not available in the FINKO knowledge base.
 """.strip()
 
 
@@ -211,21 +227,23 @@ def build_user_prompt(
     history_block: str,
 ) -> str:
     return f"""
-User language: {response_language}
+Latest user language: {response_language}
 
-Conversation history:
+Previous user messages:
 {history_block}
 
-User question:
+Latest user question:
 {user_text}
 
 Relevant FINKO knowledge-base context:
 {kb_context}
 
-Write the best possible answer for the user.
+Write the best possible answer for the latest user question.
 
 Requirements:
 - Answer only in {response_language}.
+- Focus on the latest user message.
+- Do not let earlier messages override the answer language.
 - Be accurate and concise.
 - Do not repeat the same facts unnecessarily.
 - Do not copy the context word-for-word.
@@ -247,24 +265,61 @@ def file_lang_from_filename(filename: str) -> str | None:
 
 
 def normalize_text_for_dedup(text: str) -> str:
-    cleaned = re.sub(r"\s+", " ", text).strip().lower()
-    return cleaned
+    return re.sub(r"\s+", " ", text).strip().lower()
 
 
-def search_knowledge_base(user_text: str, preferred_lang: str) -> str | None:
+def build_search_queries(user_text: str, detected_lang: str) -> list[str]:
     """
-    Search the vector store, then prioritize chunks whose filenames match the user's language.
-    Falls back to chunks from other languages if needed.
+    Main query + lightweight fallback queries to improve recall.
     """
+    queries = [user_text.strip()]
+
+    lowered = user_text.lower().strip()
+
+    if detected_lang == "ru":
+        if "какие банки" in lowered or "с какими банками" in lowered:
+            queries.append("банки партнеры FINKO")
+            queries.append("Hamkorbank Universal Bank Davr-Bank Madad Invest Bank")
+        elif "мфо" in lowered or "микрофинансов" in lowered:
+            queries.append("МФО партнеры FINKO")
+            queries.append("DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN")
+    elif detected_lang == "uz":
+        if "qaysi banklar" in lowered or "banklar bilan" in lowered:
+            queries.append("FINKO hamkor banklar")
+            queries.append("Hamkorbank Universal Bank Davr-Bank Madad Invest Bank")
+        elif "mmt" in lowered or "mikromoliyaviy" in lowered:
+            queries.append("FINKO hamkor MMTlar")
+            queries.append("DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN")
+    elif detected_lang == "en":
+        if "which banks" in lowered or "banks do you work with" in lowered:
+            queries.append("FINKO partner banks")
+            queries.append("Hamkorbank Universal Bank Davr-Bank Madad Invest Bank")
+        elif "mfo" in lowered or "microfinance" in lowered:
+            queries.append("FINKO partner MFOs")
+            queries.append("DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN")
+
+    # de-dup while keeping order
+    unique: list[str] = []
+    seen: set[str] = set()
+    for query in queries:
+        key = query.lower().strip()
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(query)
+
+    return unique[:3]
+
+
+def search_once(query: str, preferred_lang: str) -> list[str]:
     try:
         result = client.vector_stores.search(
             vector_store_id=OPENAI_VECTOR_STORE_ID,
-            query=user_text,
+            query=query,
             max_num_results=KB_SEARCH_RESULTS,
         )
     except Exception as e:
-        logger.exception("Knowledge base search failed: %s", e)
-        return None
+        logger.exception("Knowledge base search failed for query '%s': %s", query, e)
+        return []
 
     preferred_chunks: list[str] = []
     fallback_chunks: list[str] = []
@@ -303,30 +358,53 @@ def search_knowledge_base(user_text: str, preferred_lang: str) -> str | None:
         need = KB_MAX_CHUNKS - len(selected)
         selected.extend(fallback_chunks[:need])
 
-    if not selected:
+    return selected
+
+
+def search_knowledge_base(user_text: str, preferred_lang: str) -> str | None:
+    """
+    Search the vector store with a main query and a couple of fallback queries.
+    Prioritize chunks from the user's language file.
+    """
+    queries = build_search_queries(user_text, preferred_lang)
+
+    merged_chunks: list[str] = []
+    seen: set[str] = set()
+
+    for query in queries:
+        chunks = search_once(query, preferred_lang)
+        for chunk in chunks:
+            key = normalize_text_for_dedup(chunk)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged_chunks.append(chunk)
+
+            if len(merged_chunks) >= KB_MAX_CHUNKS:
+                break
+
+        if len(merged_chunks) >= KB_MAX_CHUNKS:
+            break
+
+    if not merged_chunks:
         return None
 
-    return "\n\n---\n\n".join(selected)
+    return "\n\n---\n\n".join(merged_chunks)
 
 
 # ---------- Chat memory ----------
 
 def get_history_block(chat_id: int) -> str:
-    turns = chat_history.get(chat_id)
-    if not turns:
-        return "No previous conversation."
+    messages = chat_history.get(chat_id)
+    if not messages:
+        return "No previous user messages."
 
-    lines: list[str] = []
-    for item in turns:
-        role = item["role"].capitalize()
-        text = item["text"].strip()
-        lines.append(f"{role}: {text}")
-
-    return "\n".join(lines)
+    recent = list(messages)[-3:]
+    return "\n".join(f"User: {text}" for text in recent)
 
 
-def save_turn(chat_id: int, role: str, text: str) -> None:
-    chat_history[chat_id].append({"role": role, "text": text})
+def save_user_message(chat_id: int, text: str) -> None:
+    chat_history[chat_id].append(text.strip())
 
 
 # ---------- LLM response ----------
@@ -352,7 +430,7 @@ def generate_answer(chat_id: int, user_text: str) -> str:
             model=OPENAI_MODEL,
             instructions=build_system_prompt(lang_name(response_lang)),
             input=prompt,
-            temperature=0.35,
+            temperature=0.2,
         )
 
         answer = (response.output_text or "").strip()
@@ -418,11 +496,8 @@ async def telegram_webhook(
     detected_lang = detect_language(user_text)
 
     try:
-        save_turn(chat_id, "user", user_text)
-
+        save_user_message(chat_id, user_text)
         answer = generate_answer(chat_id, user_text)
-
-        save_turn(chat_id, "assistant", answer)
 
         await send_telegram_message(chat_id, answer)
         return JSONResponse({"ok": True, "language": detected_lang})
