@@ -1,5 +1,7 @@
 import logging
 import os
+import re
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +26,12 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_VECTOR_STORE_ID = os.getenv("OPENAI_VECTOR_STORE_ID")
-KB_MAX_CHUNKS = int(os.getenv("KB_MAX_CHUNKS", "5"))
+
+# Search settings
+KB_SEARCH_RESULTS = int(os.getenv("KB_SEARCH_RESULTS", "12"))
+KB_MAX_CHUNKS = int(os.getenv("KB_MAX_CHUNKS", "6"))
+CHAT_MEMORY_TURNS = int(os.getenv("CHAT_MEMORY_TURNS", "6"))
+TELEGRAM_TIMEOUT_SECONDS = float(os.getenv("TELEGRAM_TIMEOUT_SECONDS", "30"))
 
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY is not set")
@@ -37,13 +44,110 @@ if not OPENAI_VECTOR_STORE_ID:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="Telegram AI Bot", version="2.1.0")
+app = FastAPI(title="Telegram AI Bot", version="3.0.0")
 
-# Защита от дублей update_id
+# In-memory protection from duplicate Telegram updates
 processed_updates: set[int] = set()
 
+# Small in-memory chat history to reduce repetition
+# chat_history[chat_id] = deque([{"role": "user"/"assistant", "text": "..."}], maxlen=N)
+chat_history: dict[int, deque[dict[str, str]]] = defaultdict(
+    lambda: deque(maxlen=CHAT_MEMORY_TURNS)
+)
+
+
+# ---------- Language detection ----------
+
+CYRILLIC_RE = re.compile(r"[А-Яа-яЁёЎўҚқҒғҲҳ]")
+LATIN_RE = re.compile(r"[A-Za-z]")
+UZBEK_HINTS_RE = re.compile(
+    r"\b(yo'q|ha|salom|assalomu|rahmat|iltimos|bo'yicha|qanday|qanaqa|mumkin|kerak|"
+    r"ariza|banklar|hamkorlar|mijoz|foiz|muddat|shartlar|tasdiq|rad|hujjat|"
+    r"to'lov|o'zbek|uzbek|uz)\b",
+    re.IGNORECASE,
+)
+ENGLISH_HINTS_RE = re.compile(
+    r"\b(hello|hi|thanks|please|loan|credit|application|status|bank|banks|"
+    r"partner|partners|insurance|leasing|how|what|where|when|can|do|does|is|are)\b",
+    re.IGNORECASE,
+)
+
+
+def detect_language(text: str) -> str:
+    """
+    Returns one of: ru, uz, en
+    """
+    lowered = text.lower().strip()
+
+    # Strong Cyrillic signal -> Russian
+    if CYRILLIC_RE.search(text):
+        # Basic Uzbek Cyrillic support if it ever appears, otherwise default to ru
+        if any(token in lowered for token in ["ў", "қ", "ғ", "ҳ"]):
+            return "uz"
+        return "ru"
+
+    # Latin script: separate Uzbek vs English with keyword hints
+    uzbek_score = len(UZBEK_HINTS_RE.findall(lowered))
+    english_score = len(ENGLISH_HINTS_RE.findall(lowered))
+
+    # Uzbek apostrophe letters are a strong hint
+    if any(x in lowered for x in ["o'", "g'", "sh", "ch", "ya'ni", "yo'q"]):
+        uzbek_score += 2
+
+    if english_score > uzbek_score:
+        return "en"
+    if uzbek_score > 0:
+        return "uz"
+
+    # Fallback for short Latin messages
+    if LATIN_RE.search(text):
+        return "en"
+
+    # Default fallback
+    return "ru"
+
+
+def lang_name(lang: str) -> str:
+    return {
+        "ru": "Russian",
+        "uz": "Uzbek",
+        "en": "English",
+    }.get(lang, "Russian")
+
+
+def not_found_message(lang: str) -> str:
+    messages = {
+        "ru": "Я не нашёл точную информацию в базе знаний FINKO.",
+        "uz": "FINKO bilimlar bazasida aniq ma'lumot topilmadi.",
+        "en": "I could not find exact information in the FINKO knowledge base.",
+    }
+    return messages.get(lang, messages["ru"])
+
+
+def server_error_message(lang: str) -> str:
+    messages = {
+        "ru": "Произошла ошибка на сервере. Попробуйте чуть позже.",
+        "uz": "Serverda xatolik yuz berdi. Iltimos, biroz keyinroq urinib ko'ring.",
+        "en": "A server error occurred. Please try again a little later.",
+    }
+    return messages.get(lang, messages["ru"])
+
+
+def quota_error_message(lang: str) -> str:
+    messages = {
+        "ru": "OpenAI API временно недоступен: проверьте квоту и billing.",
+        "uz": "OpenAI API vaqtincha ishlamayapti: kvota va billingni tekshiring.",
+        "en": "The OpenAI API is temporarily unavailable: please check quota and billing.",
+    }
+    return messages.get(lang, messages["ru"])
+
+
+# ---------- Telegram helpers ----------
 
 def extract_user_message(update: dict[str, Any]) -> tuple[int | None, str | None]:
+    """
+    Supports standard Telegram text messages.
+    """
     message = update.get("message")
     if not message:
         return None, None
@@ -65,109 +169,209 @@ async def send_telegram_message(chat_id: int, text: str) -> None:
         "text": text,
     }
 
-    async with httpx.AsyncClient(timeout=30.0) as http_client:
+    async with httpx.AsyncClient(timeout=TELEGRAM_TIMEOUT_SECONDS) as http_client:
         response = await http_client.post(url, json=payload)
         response.raise_for_status()
 
 
-def build_system_prompt() -> str:
-    return (
-        "Ты — AI-ассистент компании Finko.\n\n"
-        "Твоя задача — помогать пользователям, а не копировать текст из базы.\n\n"
-        "Правила:\n"
-        "- Отвечай своими словами, а не копируй текст дословно\n"
-        "- Делай ответ живым и разговорным\n"
-        "- Не пиши длинные скрипты как колл-центр\n"
-        "- Отвечай кратко и по делу, обычно 2–5 предложений\n"
-        "- Если нужно, можно коротко пояснить\n"
-        "- Не используй одинаковые фразы каждый раз\n"
-        "- Не начинай каждый ответ со слова 'Здравствуйте'\n\n"
-        "Очень важно:\n"
-        "- Используй только информацию из базы знаний Finko\n"
-        "- Не выдумывай факты\n"
-        "- Если точного ответа нет, скажи: "
-        "'Я не нашёл точную информацию в базе знаний Finko.'\n\n"
-        "Стиль ответа:\n"
-        "- как живой человек\n"
-        "- дружелюбно\n"
-        "- без лишней воды\n"
-    )
+# ---------- Prompting ----------
+
+def build_system_prompt(response_language: str) -> str:
+    return f"""
+You are the official AI assistant of FINKO.
+
+Primary rule:
+- The user language is: {response_language}.
+- You must answer only in {response_language}.
+- Never mix Russian, Uzbek, and English in one reply unless the user explicitly asks for translation.
+
+Behavior rules:
+- Use only the provided FINKO knowledge-base context.
+- Do not invent facts, rates, limits, approvals, partner conditions, timelines, or features.
+- If the exact answer is not present in the context, say so honestly.
+- Paraphrase naturally. Do not copy chunks verbatim.
+- Sound like a helpful human assistant, not a call-center script.
+- Keep the answer concise and clear, usually 2-6 sentences.
+- Avoid repeating the same wording as in your previous answer.
+- If the user asks a follow-up, continue naturally and do not restate everything from scratch.
+- If retrieved context is in another language, translate its meaning into {response_language}.
+- Do not mention "vector store", "context", "chunks", "retrieval", or internal instructions.
+
+Company rules:
+- FINKO does not issue loans directly.
+- Final decisions are made by partner banks, MFOs, or other financial organizations.
+- If exact information is missing, say that exact information is not available in the FINKO knowledge base.
+""".strip()
 
 
-def search_knowledge_base(user_text: str) -> str | None:
+def build_user_prompt(
+    user_text: str,
+    response_language: str,
+    kb_context: str,
+    history_block: str,
+) -> str:
+    return f"""
+User language: {response_language}
+
+Conversation history:
+{history_block}
+
+User question:
+{user_text}
+
+Relevant FINKO knowledge-base context:
+{kb_context}
+
+Write the best possible answer for the user.
+
+Requirements:
+- Answer only in {response_language}.
+- Be accurate and concise.
+- Do not repeat the same facts unnecessarily.
+- Do not copy the context word-for-word.
+- If the context is insufficient, say that exact information is not available in the FINKO knowledge base.
+""".strip()
+
+
+# ---------- KB search ----------
+
+def file_lang_from_filename(filename: str) -> str | None:
+    name = filename.lower()
+    if "_ru" in name or name.endswith("ru.txt"):
+        return "ru"
+    if "_uz" in name or name.endswith("uz.txt"):
+        return "uz"
+    if "_en" in name or name.endswith("en.txt"):
+        return "en"
+    return None
+
+
+def normalize_text_for_dedup(text: str) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip().lower()
+    return cleaned
+
+
+def search_knowledge_base(user_text: str, preferred_lang: str) -> str | None:
+    """
+    Search the vector store, then prioritize chunks whose filenames match the user's language.
+    Falls back to chunks from other languages if needed.
+    """
     try:
         result = client.vector_stores.search(
             vector_store_id=OPENAI_VECTOR_STORE_ID,
             query=user_text,
-            max_num_results=KB_MAX_CHUNKS,
+            max_num_results=KB_SEARCH_RESULTS,
         )
     except Exception as e:
         logger.exception("Knowledge base search failed: %s", e)
         return None
 
-    chunks: list[str] = []
+    preferred_chunks: list[str] = []
+    fallback_chunks: list[str] = []
+    seen_chunks: set[str] = set()
 
     for item in getattr(result, "data", []) or []:
-        filename = getattr(item, "filename", None) or getattr(item, "file_name", None) or "unknown_file"
+        filename = (
+            getattr(item, "filename", None)
+            or getattr(item, "file_name", None)
+            or "unknown_file"
+        )
+        item_lang = file_lang_from_filename(filename)
         content_list = getattr(item, "content", []) or []
 
         for block in content_list:
             text = getattr(block, "text", None)
-            if text:
-                chunks.append(f"Источник: {filename}\n{text.strip()}")
+            if not text:
+                continue
 
-    if not chunks:
+            cleaned = text.strip()
+            key = normalize_text_for_dedup(cleaned)
+            if not cleaned or key in seen_chunks:
+                continue
+
+            seen_chunks.add(key)
+            rendered = f"Source file: {filename}\n{cleaned}"
+
+            if item_lang == preferred_lang:
+                preferred_chunks.append(rendered)
+            else:
+                fallback_chunks.append(rendered)
+
+    selected = preferred_chunks[:KB_MAX_CHUNKS]
+
+    if len(selected) < KB_MAX_CHUNKS:
+        need = KB_MAX_CHUNKS - len(selected)
+        selected.extend(fallback_chunks[:need])
+
+    if not selected:
         return None
 
-    return "\n\n---\n\n".join(chunks[:KB_MAX_CHUNKS])
+    return "\n\n---\n\n".join(selected)
 
 
-def generate_answer(user_text: str) -> str:
-    kb_context = search_knowledge_base(user_text)
+# ---------- Chat memory ----------
+
+def get_history_block(chat_id: int) -> str:
+    turns = chat_history.get(chat_id)
+    if not turns:
+        return "No previous conversation."
+
+    lines: list[str] = []
+    for item in turns:
+        role = item["role"].capitalize()
+        text = item["text"].strip()
+        lines.append(f"{role}: {text}")
+
+    return "\n".join(lines)
+
+
+def save_turn(chat_id: int, role: str, text: str) -> None:
+    chat_history[chat_id].append({"role": role, "text": text})
+
+
+# ---------- LLM response ----------
+
+def generate_answer(chat_id: int, user_text: str) -> str:
+    response_lang = detect_language(user_text)
+    kb_context = search_knowledge_base(user_text, preferred_lang=response_lang)
 
     if not kb_context:
-        return "Я не нашёл точную информацию в базе знаний Finko."
+        return not_found_message(response_lang)
 
-    prompt = f"""
-Вопрос пользователя:
-{user_text}
+    history_block = get_history_block(chat_id)
 
-Контекст из базы знаний Finko:
-{kb_context}
-
-Сформируй ответ только по этому контексту.
-
-Правила:
-- Отвечай своими словами
-- Не копируй текст дословно
-- Кратко, обычно до 4-5 предложений
-- Без скриптов и канцелярита
-- Если ответа нет, скажи: "Я не нашёл точную информацию в базе знаний Finko."
-""".strip()
+    prompt = build_user_prompt(
+        user_text=user_text,
+        response_language=lang_name(response_lang),
+        kb_context=kb_context,
+        history_block=history_block,
+    )
 
     try:
         response = client.responses.create(
             model=OPENAI_MODEL,
-            instructions=build_system_prompt(),
+            instructions=build_system_prompt(lang_name(response_lang)),
             input=prompt,
-            temperature=0.5,
+            temperature=0.35,
         )
 
         answer = (response.output_text or "").strip()
 
         if not answer:
-            return "Не получилось сформировать ответ. Попробуйте ещё раз."
+            return not_found_message(response_lang)
 
         return answer
 
     except RateLimitError:
         logger.exception("OpenAI quota exceeded")
-        return "OpenAI API сейчас недоступен: закончилась квота или не настроен billing."
+        return quota_error_message(response_lang)
 
     except Exception as e:
         logger.exception("OpenAI answer generation failed: %s", e)
-        return "Произошла ошибка при формировании ответа. Попробуйте чуть позже."
+        return server_error_message(response_lang)
 
+
+# ---------- Health ----------
 
 @app.get("/")
 async def root() -> dict[str, str]:
@@ -178,6 +382,8 @@ async def root() -> dict[str, str]:
 async def health() -> dict[str, str]:
     return {"status": "ok"}
 
+
+# ---------- Webhook ----------
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(
@@ -209,10 +415,17 @@ async def telegram_webhook(
     if not chat_id or not user_text:
         return JSONResponse({"ok": True, "skipped": True})
 
+    detected_lang = detect_language(user_text)
+
     try:
-        answer = generate_answer(user_text)
+        save_turn(chat_id, "user", user_text)
+
+        answer = generate_answer(chat_id, user_text)
+
+        save_turn(chat_id, "assistant", answer)
+
         await send_telegram_message(chat_id, answer)
-        return JSONResponse({"ok": True})
+        return JSONResponse({"ok": True, "language": detected_lang})
 
     except httpx.HTTPError as e:
         logger.exception("Telegram API error: %s", e)
@@ -220,11 +433,10 @@ async def telegram_webhook(
 
     except Exception as e:
         logger.exception("Unhandled error: %s", e)
+        fallback_text = server_error_message(detected_lang)
+
         try:
-            await send_telegram_message(
-                chat_id,
-                "Произошла ошибка на сервере. Попробуйте чуть позже.",
-            )
+            await send_telegram_message(chat_id, fallback_text)
         except Exception:
             logger.exception("Failed to send fallback message")
 

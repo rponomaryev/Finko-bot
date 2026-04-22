@@ -1,0 +1,156 @@
+# FINKO - Bilimlar bazasi (O'zbek tili)
+
+---
+
+## KOMPANIYA HAQIDA
+
+FINKO - O'zbekistondagi onlayn moliyaviy xizmatlar marketpleysi. Platforma banklar, mikromolov tashkilotlar (MMT), lizing va sug'urta kompaniyalarini mijozlar bilan birlashtiradi. Barcha jarayonlar to'liq raqamli: arizani topshirishdan tortib moliyaviy tashkilotga ma'lumot uzatishgacha.
+
+Huquqiy holat: kompaniya "Finance KO" MChJ sifatida ro'yxatdan o'tgan va FINKO savdo markasi ostida faoliyat yuritadi. FINKO O'zbekiston Respublikasi IT PARKining rezidentidir.
+
+FINKO to'g'ridan-to'g'ri kredit bermaydi. Arizalar bo'yicha barcha qarorlarni hamkor banklar, MMT va boshqa moliyaviy tashkilotlar qabul qiladi.
+
+---
+
+## HAMKORLAR
+
+Hamkor banklar: Hamkorbank, Universal Bank, Davr-Bank, Madad Invest Bank.
+Hamkor MMTlar: DELTA, PULMAN, APEX MOLIYA, ANSOR, ALMIZAN.
+
+Hamkor tashkilotlar soni doimiy ravishda o'sib bormoqda - biz yangi banklar, MMT va lizing kompaniyalari bilan hamkorlik tarmog'ini faol kengaytirmoqdamiz.
+
+---
+
+## MAHSULOTLAR VA XIZMATLAR
+
+FINKO platformasi orqali quyidagilar mavjud:
+
+1. Iste'mol kreditlari - jismoniy shaxslar uchun naqd pul kreditlari va shaxsiy kreditlar.
+2. Avtokreditlar - hamkor banklar orqali avtomobil sotib olish uchun kredit.
+3. Ipoteka - hamkor banklar orqali uy-joy sotib olish uchun kredit.
+4. Mikrokreditlar - hamkor MMTlardan kichik summalar va qisqa muddatlarga tezkor qarzlar.
+5. Depozitlar - hamkor banklardagi depozit shartlarini solishtirish va tanlash.
+6. Biznes kreditlari - yakka tartibli tadbirkorlar va yuridik shaxslar uchun kreditlar: biznes kreditlari, aylanma va investitsiya kreditlari.
+7. Lizing - uskunalar, transport vositalari va boshqa aktivlar uchun lizing.
+8. Sug'urta - hamkor kompaniyalarning sug'urta mahsulotlariga ariza topshirish.
+9. Islom moliyasi - shariat me'yorlariga mos moliyaviy mahsulotlar.
+10. Kredit tarixini tekshirish - kredit tarixi, qarz yuki, skoring va reytingni tekshirish.
+11. Moliyaviy konsultatsiya - mos moliyaviy mahsulotni tanlashda yordam.
+
+Har bir mahsulot shartlari (summa, muddat, foiz stavkasi) hamkor bank yoki MMT tomonidan belgilanadi. FINKO arizaning tasdiqlanishini kafolatlamaydi.
+
+---
+
+## PLATFORMA QANDAY ISHLAYDI
+
+1. Foydalanuvchi platformada ro'yxatdan o'tadi.
+2. Kerakli mahsulotni tanlaydi va ariza to'ldiradi.
+3. Ma'lumotlar davlat identifikatsiya tizimlari orqali avtomatik tekshiriladi (myID, ONEID, iHamkor.uz).
+4. Ariza mos hamkor tashkilotlarga yuboriladi.
+5. Mijoz takliflarni oladi va eng maqbulini tanlaydi.
+
+Bitta ariza bir vaqtning o'zida bir nechta tashkilotga yuborilishi mumkin.
+
+---
+
+## KO'P SO'RALADIGAN SAVOLLAR - JISMONIY SHAXSLAR
+
+Savol: Ofisga borish kerakmi?
+Javob: Yo'q. Barcha jarayonlar onlayn amalga oshiriladi. Shaxsiy ishtirok faqat shartnoma imzolashda bank talabi bo'yicha talab qilinishi mumkin.
+
+Savol: Ariza ko'rib chiqish qancha vaqt oladi?
+Javob: Mahsulot va bankka qarab farq qiladi. Mikrokreditlar - bir necha soat. Iste'mol kreditlari — bir necha soatdan 1–3 ish kunigacha. Biznes kreditlari va lizing — 1 kundan 5–7 ish kunigacha.
+
+Savol: Ariza holatini qanday bilish mumkin?
+Javob: Holat shaxsiy kabinetda mavjud. Har bir o'zgarish haqida email va SMS bildirishnomalar ham yuboriladi.
+
+Savol: Bir vaqtda bir nechta bankka ariza topshirish mumkinmi?
+Javob: Ha. Platforma bitta arizani bir vaqtda bir nechta tashkilotga yuborish imkonini beradi.
+
+Savol: Bu xavfsizmi? Ma'lumotlarim kimga uzatiladi?
+Javob: Barcha ma'lumotlar shifrlangan holda faqat arizangizni ko'rib chiqayotgan banklar va MMTlarga uzatiladi. Uchinchi shaxslarga ma'lumot berilmaydi.
+
+Savol: Platformadan foydalanish uchun to'lov bormi?
+Javob: Yo'q. Ro'yxatdan o'tish va ariza topshirish bepul.
+
+Savol: Qanday hujjatlar kerak?
+Javob: Jismoniy shaxslar uchun odatda: pasport, STIR, daromad ma'lumotnomasi (bank talab qilsa). Bank qo'shimcha hujjatlar so'rashi mumkin. YTT uchun: ro'yxatdan o'tish guvohnomasi, STIR, moliyaviy hisobot, egasining pasporti. Yuridik shaxslar uchun: ta'sis hujjatlari, STIR, moliyaviy hisobot, direktor pasporti.
+
+Savol: Ariza yuborilgandan keyin ma'lumotlarni o'zgartirish mumkinmi?
+Javob: Ha. Shaxsiy kabinet orqali ma'lumotlarni tahrirlash va arizani qayta yuborish mumkin.
+
+Savol: Rad etilgandan keyin qayta ariza topshirish mumkinmi?
+Javob: Ha. Istalgan vaqtda qayta ariza topshirish mumkin.
+
+Savol: Ariza nima uchun rad etilishi mumkin?
+Javob: Qarorni bank yoki MMT qabul qiladi. Sabablar kredit tarixi, hujjatlarning yetarli emasligi yoki tashkilotning ichki talablari bilan bog'liq bo'lishi mumkin. FINKO bu qarorlarga ta'sir ko'rsatmaydi.
+
+Savol: Kredit berilishi kafolatlangan?
+Javob: Yo'q. FINKO tasdiqlanishini kafolatlamaydi. Qarorni bank yoki MMT o'z ichki mezonlari asosida qabul qiladi.
+
+Savol: Bank qo'shimcha hujjat so'rasa nima qilish kerak?
+Javob: Shaxsiy kabinetda bildirishnoma olasiz. Kerakli hujjatlarni platforma orqali yuklang.
+
+Savol: Arizani bekor qilish mumkinmi?
+Javob: Ha. Shaxsiy kabinet orqali yoki qo'llab-quvvatlash xizmatiga murojaat qilib.
+
+Savol: Kredit tarixini tekshirish mumkinmi?
+Javob: Ha. Platforma kredit tarixi, qarz yuki, skoring va reytingni tekshirish imkonini beradi.
+
+Savol: Elektron imzo qo'llab-quvvatlanadimi?
+Javob: Ha. Hujjatlarni ERI (elektron raqamli imzo) orqali platforma ichida imzolash mumkin.
+
+Savol: Mobil ilova bormi?
+Javob: Mobil ilova hozirda ishlab chiqilmoqda. Hozircha platforma finko.uz sayti orqali mavjud.
+
+---
+
+## KO'P SO'RALADIGAN SAVOLLAR - BIZNES
+
+Savol: Biznes uchun qanday mahsulotlar mavjud?
+Javob: Biznes kreditlari, aylanma va investitsiya kreditlari, lizing (uskunalar, transport), sug'urta, islom moliyasi.
+
+Savol: Bir vaqtda bir nechta mahsulotga ariza topshirish mumkinmi?
+Javob: Ha. Bir vaqtda bir nechta ariza (masalan, kredit va lizing) topshirish mumkin.
+
+Savol: Bankka shaxsan borish kerakmi?
+Javob: Ko'p hollarda yo'q. Shaxsiy tashrif faqat shartnoma imzolashda talab qilinishi mumkin.
+
+Savol: Korporativ kabinetni ERP tizimi bilan integratsiya qilish mumkinmi?
+Javob: Ha. FINKO API orqali integratsiya imkoniyatini taqdim etadi.
+
+---
+
+## HAMKORLAR UCHUN MA'LUMOT (BANKLAR, MMT, LIZING KOMPANIYALARI)
+
+Savol: FINKO bilan hamkorlikdan qanday foyda bor?
+Javob: Hamkor qo'shimcha mijozlar oqimini, to'liq raqamli savdo kanalini, arizalarni qayta ishlashni avtomatlashtirish, mijozlarni jalb qilish xarajatlarini kamaytirish va boshlang'ich investitsiyasiz tezkor ishga tushirishni oladi. To'lov faqat tasdiqlangan va ma'qullangan arizalar uchun olinadi.
+
+Savol: Ulanish jarayoni qanday kechadi?
+Javob: Uch qadam: shartnoma imzolash → shaxsiy kabinetni sozlash va mahsulotlarni yuklash → sinov va ishga tushirish. Texnik integratsiyasiz — 1–3 ish kunida arizalar qabul qilishni boshlash mumkin.
+
+Savol: Arizalar qanday tanlanadi?
+Javob: Birlamchi filtrlash va davlat identifikatsiya tizimlari orqali avtomatik ma'lumotlarni tekshirish qo'llaniladi. Tashkilotga faqat to'g'ri, tasdiqlangan arizalar keladi.
+
+Savol: Tashkilotimiz uchun individual shartlar sozlanishi mumkinmi?
+Javob: Ha. Alohida kabinet ajratish, filtrlar sozlash, skoring logikasini integratsiya qilish, API ulash va mahsulotlarni alohida blokda ko'rsatish mumkin.
+
+Savol: Platforma namoyishini o'tkazish mumkinmi?
+Javob: Ha. Namoyish ofisda yoki onlayn qulay vaqtda o'tkaziladi.
+
+---
+
+## XAVFSIZLIK
+
+FINKO ma'lumotlarni shifrlash, ikki faktorli autentifikatsiya va IT PARK standartlaridan foydalanadi. Platforma milliy identifikatsiya tizimlari bilan integratsiya qilingan: myID, ONEID, iHamkor.uz. Mijoz ma'lumotlari faqat ularning roziligi bilan va faqat arizani ko'rib chiqayotgan moliyaviy tashkilotlarga uzatiladi.
+
+---
+
+## ALOQA
+
+Telefon: +998 50 177 77 88
+Email: info@finko.uz
+Ofis: Toshkent sh., Mirobod tumani, Oybek ko'ch. 18/1, ATRIUM biznes markazi
+Sayt: https://finko.uz/uz
+
+Agar foydalanuvchining savoli bilimlar bazasida yo'q bo'lsa, buni halol aytib, yuqoridagi kontaktlar orqali murojaat qilishni taklif eting.
