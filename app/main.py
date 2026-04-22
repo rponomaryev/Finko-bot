@@ -826,8 +826,11 @@ def resolve_response_language_for_message(user_text: str) -> str:
     return detect_language(user_text)
 
 
-def handle_menu_or_quick_action(user_text: str, chat_id: int) -> tuple[str | None, str | None]:
-    lang = detect_language(user_text)
+def handle_menu_or_quick_action(
+    user_text: str,
+    chat_id: int,
+    ui_lang: str,
+) -> tuple[str | None, str | None]:
     intent = detect_intent(user_text)
 
     if not should_use_quick_reply(intent, user_text):
@@ -845,7 +848,8 @@ def handle_menu_or_quick_action(user_text: str, chat_id: int) -> tuple[str | Non
     elif intent == "partners":
         quick_intent = "partners_menu"
 
-    answer = build_quick_answer(quick_intent, lang)
+    # Для кнопок и быстрых ответов используем ЯЗЫК ИНТЕРФЕЙСА, а не detect_language(user_text)
+    answer = build_quick_answer(quick_intent, ui_lang)
     return answer or None, intent
 
 # ============================================================
@@ -1485,7 +1489,7 @@ async def telegram_webhook(
         source="telegram",
     )
 
-    quick_answer, quick_intent = handle_menu_or_quick_action(user_text, chat_id)
+    quick_answer, quick_intent = handle_menu_or_quick_action(user_text, chat_id, ui_lang)
     if quick_answer:
         await send_telegram_message(chat_id, quick_answer, ui_lang=ui_lang)
         save_assistant_message(chat_id, quick_answer)
