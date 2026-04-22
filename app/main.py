@@ -1,15 +1,23 @@
 import logging
 import os
 import re
-from collections import defaultdict, deque
+import sqlite3
+import threading
+from collections import Counter, defaultdict, deque
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Request, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from openai import OpenAI, RateLimitError
+
+# ============================================================
+# Environment / config
+# ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 ENV_FILE = BASE_DIR / ".env"
@@ -33,6 +41,10 @@ KB_MAX_CHUNKS = int(os.getenv("KB_MAX_CHUNKS", "8"))
 CHAT_MEMORY_TURNS = int(os.getenv("CHAT_MEMORY_TURNS", "8"))
 TELEGRAM_TIMEOUT_SECONDS = float(os.getenv("TELEGRAM_TIMEOUT_SECONDS", "30"))
 
+# Analytics / DB
+DATABASE_PATH = os.getenv("DATABASE_PATH", str(BASE_DIR / "bot_analytics.db"))
+ADMIN_ANALYTICS_TOKEN = os.getenv("ADMIN_ANALYTICS_TOKEN", "")
+
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY is not set")
 if not TELEGRAM_BOT_TOKEN:
@@ -44,17 +56,208 @@ if not OPENAI_VECTOR_STORE_ID:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-app = FastAPI(title="Telegram AI Bot", version="3.1.0")
+app = FastAPI(title="Telegram AI Bot", version="4.0.0")
 
-# In-memory protection from duplicate Telegram updates
+# ============================================================
+# In-memory state
+# ============================================================
+
 processed_updates: set[int] = set()
 
-# Store only USER messages to reduce repetition without polluting language state
-chat_history: dict[int, deque[str]] = defaultdict(
+# Store only USER messages for conversational continuity
+chat_user_history: dict[int, deque[str]] = defaultdict(
     lambda: deque(maxlen=CHAT_MEMORY_TURNS)
 )
 
-# ---------- Language detection ----------
+# Store recent assistant replies to reduce repetition
+chat_assistant_history: dict[int, deque[str]] = defaultdict(
+    lambda: deque(maxlen=5)
+)
+
+db_lock = threading.Lock()
+
+# ============================================================
+# Database
+# ============================================================
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@contextmanager
+def get_db():
+    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def init_db() -> None:
+    with db_lock:
+        with get_db() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    chat_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    first_name TEXT,
+                    last_name TEXT,
+                    last_language TEXT,
+                    user_type TEXT,
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    messages_count INTEGER NOT NULL DEFAULT 0
+                );
+
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER NOT NULL,
+                    direction TEXT NOT NULL,              -- inbound / outbound
+                    text TEXT NOT NULL,
+                    language TEXT,
+                    intent TEXT,
+                    user_type TEXT,
+                    source TEXT NOT NULL,                 -- quick / openai / menu / fallback
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    chat_id INTEGER,
+                    event_type TEXT NOT NULL,
+                    payload TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_messages_chat_created
+                ON messages(chat_id, created_at);
+
+                CREATE INDEX IF NOT EXISTS idx_messages_intent
+                ON messages(intent);
+
+                CREATE INDEX IF NOT EXISTS idx_messages_language
+                ON messages(language);
+                """
+            )
+
+
+@app.on_event("startup")
+async def startup_event():
+    init_db()
+    logger.info("Database initialized at %s", DATABASE_PATH)
+
+
+def upsert_user_profile(
+    chat_id: int,
+    username: str | None,
+    first_name: str | None,
+    last_name: str | None,
+    language: str,
+    user_type: str,
+) -> None:
+    now = utc_now_iso()
+    with db_lock:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT chat_id, messages_count, first_seen_at FROM users WHERE chat_id = ?",
+                (chat_id,),
+            ).fetchone()
+
+            if row:
+                conn.execute(
+                    """
+                    UPDATE users
+                    SET username = ?,
+                        first_name = ?,
+                        last_name = ?,
+                        last_language = ?,
+                        user_type = ?,
+                        last_seen_at = ?,
+                        messages_count = messages_count + 1
+                    WHERE chat_id = ?
+                    """,
+                    (
+                        username,
+                        first_name,
+                        last_name,
+                        language,
+                        user_type,
+                        now,
+                        chat_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO users (
+                        chat_id, username, first_name, last_name,
+                        last_language, user_type,
+                        first_seen_at, last_seen_at, messages_count
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                    """,
+                    (
+                        chat_id,
+                        username,
+                        first_name,
+                        last_name,
+                        language,
+                        user_type,
+                        now,
+                        now,
+                    ),
+                )
+
+
+def log_message(
+    chat_id: int,
+    direction: str,
+    text: str,
+    language: str | None,
+    intent: str | None,
+    user_type: str | None,
+    source: str,
+) -> None:
+    with db_lock:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO messages (
+                    chat_id, direction, text, language, intent, user_type, source, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    chat_id,
+                    direction,
+                    text,
+                    language,
+                    intent,
+                    user_type,
+                    source,
+                    utc_now_iso(),
+                ),
+            )
+
+
+def log_event(chat_id: int | None, event_type: str, payload: str | None = None) -> None:
+    with db_lock:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO events (chat_id, event_type, payload, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (chat_id, event_type, payload, utc_now_iso()),
+            )
+
+
+# ============================================================
+# Language detection
+# ============================================================
 
 CYRILLIC_RE = re.compile(r"[А-Яа-яЁёЎўҚқҒғҲҳ]")
 LATIN_RE = re.compile(r"[A-Za-z]")
@@ -64,7 +267,8 @@ UZBEK_HINTS_RE = re.compile(
     r"yo'q|ha|salom|assalomu|rahmat|iltimos|bo'yicha|qanday|qanaqa|mumkin|kerak|"
     r"ariza|banklar|hamkorlar|mijoz|foiz|muddat|shartlar|tasdiq|rad|hujjat|"
     r"to'lov|o'zbek|uzbek|qaysi|bilan|ishlaysiz|kompaniya|tashkilot|"
-    r"ma'lumot|mavjud|kerakmi|bormi|qiladi|qilinadi|yoki"
+    r"ma'lumot|mavjud|kerakmi|bormi|qiladi|qilinadi|yoki|hamkor|biznes|"
+    r"aloqa|kontakt|kredit|qarz|mfo|mmt|moliya"
     r")\b",
     re.IGNORECASE,
 )
@@ -73,7 +277,8 @@ ENGLISH_HINTS_RE = re.compile(
     r"\b("
     r"hello|hi|thanks|please|loan|credit|application|status|bank|banks|"
     r"partner|partners|insurance|leasing|how|what|where|when|can|do|does|"
-    r"is|are|which|work|with|company|information|available|customer"
+    r"is|are|which|work|with|company|information|available|customer|"
+    r"business|contact|contacts|support|help|mortgage|car loan|microfinance"
     r")\b",
     re.IGNORECASE,
 )
@@ -88,9 +293,7 @@ def detect_language(text: str) -> str:
     if not lowered:
         return "ru"
 
-    # Cyrillic => usually Russian
     if CYRILLIC_RE.search(text):
-        # Basic Uzbek Cyrillic letters
         if any(token in lowered for token in ["ў", "қ", "ғ", "ҳ"]):
             return "uz"
         return "ru"
@@ -98,11 +301,9 @@ def detect_language(text: str) -> str:
     uzbek_score = len(UZBEK_HINTS_RE.findall(lowered))
     english_score = len(ENGLISH_HINTS_RE.findall(lowered))
 
-    # Uzbek Latin apostrophe patterns
     if any(x in lowered for x in ["o'", "g'", "ya'ni", "yo'q"]):
         uzbek_score += 3
 
-    # Common Uzbek Latin digraph patterns
     if any(x in lowered for x in ["sh", "ch", "ng"]):
         uzbek_score += 1
 
@@ -111,12 +312,10 @@ def detect_language(text: str) -> str:
     if uzbek_score > english_score:
         return "uz"
 
-    # If it's Latin and unclear, prefer English only if it really looks English
-    common_en = {"the", "what", "which", "hello", "hi", "bank", "banks"}
+    common_en = {"the", "what", "which", "hello", "hi", "bank", "banks", "contacts"}
     if any(word in lowered.split() for word in common_en):
         return "en"
 
-    # Otherwise treat ambiguous Latin in this bot context as Uzbek first
     if LATIN_RE.search(text):
         return "uz"
 
@@ -158,31 +357,172 @@ def quota_error_message(lang: str) -> str:
     return messages.get(lang, messages["ru"])
 
 
-# ---------- Telegram helpers ----------
+# ============================================================
+# Intents / user types
+# ============================================================
 
-def extract_user_message(update: dict[str, Any]) -> tuple[int | None, str | None]:
-    """
-    Supports standard Telegram text messages.
-    """
-    message = update.get("message")
-    if not message:
-        return None, None
-
-    chat = message.get("chat", {})
-    chat_id = chat.get("id")
-    text = message.get("text")
-
-    if not chat_id or not text:
-        return None, None
-
-    return chat_id, text.strip()
+def normalize_text_for_match(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().lower()
 
 
-async def send_telegram_message(chat_id: int, text: str) -> None:
+def tokenize(text: str) -> set[str]:
+    words = re.findall(r"[A-Za-zА-Яа-яЁёЎўҚқҒғҲҳ0-9']+", text.lower())
+    stopwords = {
+        "и", "в", "на", "по", "с", "у", "a", "the", "is", "are", "to", "for",
+        "va", "ham", "bilan", "qanday", "what", "how", "please", "привет",
+        "здравствуйте", "salom", "hello", "hi",
+    }
+    return {w for w in words if len(w) > 2 and w not in stopwords}
+
+
+def text_similarity(a: str, b: str) -> float:
+    a_tokens = tokenize(a)
+    b_tokens = tokenize(b)
+    if not a_tokens or not b_tokens:
+        return 0.0
+    intersection = len(a_tokens & b_tokens)
+    union = len(a_tokens | b_tokens)
+    return intersection / union if union else 0.0
+
+
+def detect_intent(user_text: str) -> str:
+    text = normalize_text_for_match(user_text)
+
+    # Commands / menu
+    if text in {
+        "/start", "/restart", "restart", "перезапуск", "qayta", "qayta ishga tushirish"
+    }:
+        return "restart"
+
+    if text in {
+        "kontakti", "contacts", "contact", "контакты", "контакт", "/contacts"
+    }:
+        return "contacts"
+
+    if text in {
+        "кредиты", "kreditlar", "credits", "credit", "loan", "loans", "/credits"
+    }:
+        return "credits_menu"
+
+    if text in {
+        "бизнес", "biznes", "business", "/business"
+    }:
+        return "business_menu"
+
+    if text in {
+        "партнёрам", "партнерам", "hamkorlarga", "partners", "partner", "/partners"
+    }:
+        return "partners_menu"
+
+    # Greetings / thanks
+    if text in {"привет", "здравствуйте", "салом", "salom", "hello", "hi", "assalomu alaykum"}:
+        return "greeting"
+
+    if text in {"спасибо", "rahmat", "thanks", "thank you"}:
+        return "thanks"
+
+    # Heuristic intents
+    partner_keywords = [
+        "партнер", "партнёр", "hamkor", "partner", "bank", "mfo", "мфо",
+        "api", "integration", "интегра", "erp", "подключ", "onboarding",
+        "банк", "лизинг", "страхов", "mmt", "hamkorlar",
+    ]
+    business_keywords = [
+        "business", "biznes", "бизнес", "компания", "company", "corporate",
+        "юрид", "yuridik", "ип", "ooo", "llc", "предприним", "biznes kredit",
+    ]
+    credit_keywords = [
+        "кредит", "credit", "loan", "ипотек", "mortgage", "авто", "car loan",
+        "microloan", "mikrozaym", "микроз", "qarz", "kredit", "ipoteka",
+    ]
+    contact_keywords = [
+        "контакт", "contact", "contacts", "aloqa", "телефон", "email", "почта",
+        "support", "поддерж", "help",
+    ]
+
+    if any(k in text for k in contact_keywords):
+        return "contacts"
+
+    if any(k in text for k in partner_keywords):
+        return "partners"
+
+    if any(k in text for k in business_keywords):
+        return "business"
+
+    if any(k in text for k in credit_keywords):
+        return "credits"
+
+    return "general"
+
+
+def infer_user_type(intent: str, user_text: str) -> str:
+    text = normalize_text_for_match(user_text)
+
+    if intent in {"partners", "partners_menu"}:
+        return "partner"
+
+    if intent in {"business", "business_menu"}:
+        return "business"
+
+    if any(k in text for k in ["bank", "банк", "mfo", "мфо", "partner", "hamkor", "api", "erp"]):
+        return "partner"
+
+    if any(k in text for k in ["company", "компания", "yuridik", "юрид", "biznes", "бизнес", "ип"]):
+        return "business"
+
+    return "customer"
+
+
+# ============================================================
+# Telegram UI
+# ============================================================
+
+def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
+    labels = {
+        "ru": {
+            "credits": "Кредиты",
+            "business": "Бизнес",
+            "partners": "Партнёрам",
+            "restart": "Restart",
+            "contacts": "Контакты",
+            "placeholder": "Напишите вопрос...",
+        },
+        "uz": {
+            "credits": "Kreditlar",
+            "business": "Biznes",
+            "partners": "Hamkorlarga",
+            "restart": "Restart",
+            "contacts": "Kontakti",
+            "placeholder": "Savolingizni yozing...",
+        },
+        "en": {
+            "credits": "Credits",
+            "business": "Business",
+            "partners": "Partners",
+            "restart": "Restart",
+            "contacts": "Contacts",
+            "placeholder": "Write a message...",
+        },
+    }[lang]
+
+    return {
+        "keyboard": [
+            [{"text": labels["credits"]}, {"text": labels["business"]}],
+            [{"text": labels["partners"]}],
+            [{"text": labels["restart"]}, {"text": labels["contacts"]}],
+        ],
+        "resize_keyboard": True,
+        "persistent_keyboard": True,
+        "input_field_placeholder": labels["placeholder"],
+    }
+
+
+async def send_telegram_message(chat_id: int, text: str, ui_lang: str = "ru") -> None:
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": text,
+        "reply_markup": get_keyboard_for_lang(ui_lang),
     }
 
     async with httpx.AsyncClient(timeout=TELEGRAM_TIMEOUT_SECONDS) as http_client:
@@ -190,68 +530,178 @@ async def send_telegram_message(chat_id: int, text: str) -> None:
         response.raise_for_status()
 
 
-# ---------- Prompting ----------
+def extract_user_message(update: dict[str, Any]) -> tuple[int | None, str | None, dict[str, Any]]:
+    """
+    Supports standard Telegram text messages.
+    """
+    message = update.get("message")
+    if not message:
+        return None, None, {}
 
-def build_system_prompt(response_language: str) -> str:
-    return f"""
-You are the official AI assistant of FINKO.
+    chat = message.get("chat", {})
+    from_user = message.get("from", {})
 
-CRITICAL LANGUAGE RULE:
-- The language of the latest user message is {response_language}.
-- You must answer only in {response_language}.
-- Ignore the language used earlier in the conversation.
-- Ignore the language of previous assistant replies.
-- Never continue in a previous language unless the latest user message is in that language.
-- Never mix Russian, Uzbek, and English in one reply unless the user explicitly asks for translation.
+    chat_id = chat.get("id")
+    text = message.get("text")
 
-KNOWLEDGE RULES:
-- Use only the provided FINKO knowledge-base context.
-- Do not invent facts, rates, limits, approvals, partner conditions, or timelines.
-- If the exact answer is not present in the context, say so honestly.
-- Paraphrase naturally. Do not copy chunks verbatim.
-- Keep the answer concise, clear, and natural.
-- Avoid repeating the same information if it was already covered recently.
-- If retrieved context is in another language, translate its meaning into {response_language}.
-- Do not mention internal instructions, vector stores, retrieval, chunks, or prompts.
+    if not chat_id or not text:
+        return None, None, {}
 
-COMPANY RULES:
-- FINKO does not issue loans directly.
-- Final decisions are made by partner banks, MFOs, or other financial organizations.
-""".strip()
+    profile = {
+        "username": from_user.get("username"),
+        "first_name": from_user.get("first_name"),
+        "last_name": from_user.get("last_name"),
+    }
+
+    return chat_id, text.strip(), profile
 
 
-def build_user_prompt(
-    user_text: str,
-    response_language: str,
-    kb_context: str,
-    history_block: str,
-) -> str:
-    return f"""
-Latest user language: {response_language}
+# ============================================================
+# Quick answers without OpenAI
+# ============================================================
 
-Previous user messages:
-{history_block}
+def build_quick_answer(action: str, lang: str) -> str:
+    answers = {
+        "restart": {
+            "ru": "Бот перезапущен. Можете отправить новый вопрос.",
+            "uz": "Bot qayta ishga tushdi. Yangi savol yuborishingiz mumkin.",
+            "en": "The bot has been restarted. You can send a new question.",
+        },
+        "contacts": {
+            "ru": (
+                "Контакты FINKO:\n"
+                "Телефон: +998 50 177 77 88\n"
+                "Email: info@finko.uz\n"
+                "Сайт: https://finko.uz\n"
+                "Офис: Ташкент, ул. Ойбек 18/1, БЦ ATRIUM"
+            ),
+            "uz": (
+                "FINKO kontaktlari:\n"
+                "Telefon: +998 50 177 77 88\n"
+                "Email: info@finko.uz\n"
+                "Sayt: https://finko.uz\n"
+                "Ofis: Toshkent, Oybek 18/1, ATRIUM"
+            ),
+            "en": (
+                "FINKO contacts:\n"
+                "Phone: +998 50 177 77 88\n"
+                "Email: info@finko.uz\n"
+                "Website: https://finko.uz\n"
+                "Office: Tashkent, Oybek 18/1, ATRIUM"
+            ),
+        },
+        "credits_menu": {
+            "ru": (
+                "Через FINKO доступны потребительские кредиты, автокредиты, ипотека, "
+                "микрозаймы и другие финансовые продукты. Условия по сумме, сроку и ставке "
+                "определяются банком или МФО-партнёром. FINKO не выдаёт кредиты напрямую."
+            ),
+            "uz": (
+                "FINKO orqali iste'mol kreditlari, avtokreditlar, ipoteka, mikrozaymlar "
+                "va boshqa moliyaviy mahsulotlar mavjud. Summa, muddat va stavka hamkor bank "
+                "yoki MMT tomonidan belgilanadi. FINKO kreditni to'g'ridan-to'g'ri bermaydi."
+            ),
+            "en": (
+                "Through FINKO, users can access consumer loans, auto loans, mortgages, "
+                "microloans, and other financial products. The amount, term, and rate are "
+                "set by the partner bank or MFO. FINKO does not issue loans directly."
+            ),
+        },
+        "business_menu": {
+            "ru": (
+                "Для бизнеса через FINKO доступны бизнес-кредиты, оборотные и инвестиционные "
+                "кредиты, лизинг, страхование и другие решения. Итоговые условия определяются "
+                "партнёрской организацией."
+            ),
+            "uz": (
+                "Biznes uchun FINKO orqali biznes kreditlari, aylanma va investitsiya "
+                "kreditlari, lizing, sug'urta va boshqa yechimlar mavjud. Yakuniy shartlar "
+                "hamkor tashkilot tomonidan belgilanadi."
+            ),
+            "en": (
+                "For businesses, FINKO offers access to business loans, working capital and "
+                "investment loans, leasing, insurance, and related solutions. Final terms are "
+                "set by the partner organization."
+            ),
+        },
+        "partners_menu": {
+            "ru": (
+                "FINKO сотрудничает с Hamkorbank, Universal Bank, Davr-Bank и Madad Invest Bank, "
+                "а также с МФО DELTA, PULMAN, APEX MOLIYA, ANSOR и ALMIZAN. Количество партнёрских "
+                "организаций постоянно увеличивается."
+            ),
+            "uz": (
+                "FINKO Hamkorbank, Universal Bank, Davr-Bank va Madad Invest Bank bilan, "
+                "shuningdek DELTA, PULMAN, APEX MOLIYA, ANSOR va ALMIZAN kabi MMTlar bilan "
+                "hamkorlik qiladi. Hamkor tashkilotlar soni doimiy ravishda oshib bormoqda."
+            ),
+            "en": (
+                "FINKO works with Hamkorbank, Universal Bank, Davr-Bank, and Madad Invest Bank, "
+                "as well as the MFOs DELTA, PULMAN, APEX MOLIYA, ANSOR, and ALMIZAN. The number "
+                "of partner organizations is continuously growing."
+            ),
+        },
+        "greeting": {
+            "ru": "Здравствуйте! Я AI-ассистент FINKO. Могу помочь с продуктами, бизнес-вопросами, партнёрством и контактами.",
+            "uz": "Salom! Men FINKO AI yordamchisiman. Mahsulotlar, biznes savollari, hamkorlik va kontaktlar bo'yicha yordam bera olaman.",
+            "en": "Hello! I’m the FINKO AI assistant. I can help with products, business questions, partnerships, and contacts.",
+        },
+        "thanks": {
+            "ru": "Пожалуйста! Если захотите, можете задать ещё один вопрос.",
+            "uz": "Marhamat! Xohlasangiz, yana savol yuborishingiz mumkin.",
+            "en": "You’re welcome! Feel free to send another question.",
+        },
+    }
 
-Latest user question:
-{user_text}
+    if action not in answers:
+        return ""
 
-Relevant FINKO knowledge-base context:
-{kb_context}
-
-Write the best possible answer for the latest user question.
-
-Requirements:
-- Answer only in {response_language}.
-- Focus on the latest user message.
-- Do not let earlier messages override the answer language.
-- Be accurate and concise.
-- Do not repeat the same facts unnecessarily.
-- Do not copy the context word-for-word.
-- If the context is insufficient, say that exact information is not available in the FINKO knowledge base.
-""".strip()
+    return answers[action].get(lang, answers[action]["ru"])
 
 
-# ---------- KB search ----------
+def should_use_quick_reply(intent: str, user_text: str) -> bool:
+    text = normalize_text_for_match(user_text)
+
+    if intent in {
+        "restart", "contacts", "credits_menu", "business_menu", "partners_menu",
+        "greeting", "thanks"
+    }:
+        return True
+
+    # Very short direct asks
+    if len(text.split()) <= 3 and intent in {"credits", "business", "partners"}:
+        return True
+
+    return False
+
+
+def handle_menu_or_quick_action(user_text: str, chat_id: int) -> tuple[str | None, str | None]:
+    lang = detect_language(user_text)
+    intent = detect_intent(user_text)
+
+    if not should_use_quick_reply(intent, user_text):
+        return None, intent
+
+    if intent == "restart":
+        chat_user_history.pop(chat_id, None)
+        chat_assistant_history.pop(chat_id, None)
+
+    # Map detailed intents to menu quick cards if short
+    quick_intent = intent
+    if intent == "credits":
+        quick_intent = "credits_menu"
+    elif intent == "business":
+        quick_intent = "business_menu"
+    elif intent == "partners":
+        quick_intent = "partners_menu"
+
+    answer = build_quick_answer(quick_intent, lang)
+    return answer or None, intent
+
+
+# ============================================================
+# KB search
+# ============================================================
 
 def file_lang_from_filename(filename: str) -> str | None:
     name = filename.lower()
@@ -268,37 +718,84 @@ def normalize_text_for_dedup(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
-def build_search_queries(user_text: str, detected_lang: str) -> list[str]:
+def build_search_queries(user_text: str, detected_lang: str, intent: str) -> list[str]:
     """
-    Main query + lightweight fallback queries to improve recall.
+    Main query + targeted fallback queries to improve recall.
     """
     queries = [user_text.strip()]
-
     lowered = user_text.lower().strip()
 
+    if intent in {"partners", "partners_menu"}:
+        if detected_lang == "ru":
+            queries.extend([
+                "банки партнеры FINKO",
+                "Hamkorbank Universal Bank Davr-Bank Madad Invest Bank",
+                "МФО партнеры FINKO DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN",
+            ])
+        elif detected_lang == "uz":
+            queries.extend([
+                "FINKO hamkor banklar",
+                "Hamkorbank Universal Bank Davr-Bank Madad Invest Bank",
+                "FINKO hamkor MMTlar DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN",
+            ])
+        else:
+            queries.extend([
+                "FINKO partner banks",
+                "Hamkorbank Universal Bank Davr-Bank Madad Invest Bank",
+                "FINKO partner MFOs DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN",
+            ])
+
+    elif intent in {"business", "business_menu"}:
+        if detected_lang == "ru":
+            queries.extend([
+                "бизнес кредиты FINKO",
+                "лизинг страхование бизнес FINKO",
+            ])
+        elif detected_lang == "uz":
+            queries.extend([
+                "FINKO biznes kreditlari",
+                "lizing sug'urta biznes FINKO",
+            ])
+        else:
+            queries.extend([
+                "FINKO business loans",
+                "FINKO leasing insurance business",
+            ])
+
+    elif intent in {"credits", "credits_menu"}:
+        if detected_lang == "ru":
+            queries.extend([
+                "кредиты FINKO",
+                "ипотека автокредит микрозаймы FINKO",
+            ])
+        elif detected_lang == "uz":
+            queries.extend([
+                "FINKO kreditlar",
+                "ipoteka avtokredit mikrozaym FINKO",
+            ])
+        else:
+            queries.extend([
+                "FINKO credits",
+                "mortgage auto loan microloans FINKO",
+            ])
+
+    # Specific fallback for direct question patterns
     if detected_lang == "ru":
         if "какие банки" in lowered or "с какими банками" in lowered:
             queries.append("банки партнеры FINKO")
-            queries.append("Hamkorbank Universal Bank Davr-Bank Madad Invest Bank")
         elif "мфо" in lowered or "микрофинансов" in lowered:
             queries.append("МФО партнеры FINKO")
-            queries.append("DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN")
     elif detected_lang == "uz":
         if "qaysi banklar" in lowered or "banklar bilan" in lowered:
             queries.append("FINKO hamkor banklar")
-            queries.append("Hamkorbank Universal Bank Davr-Bank Madad Invest Bank")
         elif "mmt" in lowered or "mikromoliyaviy" in lowered:
             queries.append("FINKO hamkor MMTlar")
-            queries.append("DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN")
     elif detected_lang == "en":
         if "which banks" in lowered or "banks do you work with" in lowered:
             queries.append("FINKO partner banks")
-            queries.append("Hamkorbank Universal Bank Davr-Bank Madad Invest Bank")
         elif "mfo" in lowered or "microfinance" in lowered:
             queries.append("FINKO partner MFOs")
-            queries.append("DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN")
 
-    # de-dup while keeping order
     unique: list[str] = []
     seen: set[str] = set()
     for query in queries:
@@ -307,7 +804,7 @@ def build_search_queries(user_text: str, detected_lang: str) -> list[str]:
             seen.add(key)
             unique.append(query)
 
-    return unique[:3]
+    return unique[:5]
 
 
 def search_once(query: str, preferred_lang: str) -> list[str]:
@@ -361,12 +858,8 @@ def search_once(query: str, preferred_lang: str) -> list[str]:
     return selected
 
 
-def search_knowledge_base(user_text: str, preferred_lang: str) -> str | None:
-    """
-    Search the vector store with a main query and a couple of fallback queries.
-    Prioritize chunks from the user's language file.
-    """
-    queries = build_search_queries(user_text, preferred_lang)
+def search_knowledge_base(user_text: str, preferred_lang: str, intent: str) -> str | None:
+    queries = build_search_queries(user_text, preferred_lang, intent)
 
     merged_chunks: list[str] = []
     seen: set[str] = set()
@@ -392,10 +885,12 @@ def search_knowledge_base(user_text: str, preferred_lang: str) -> str | None:
     return "\n\n---\n\n".join(merged_chunks)
 
 
-# ---------- Chat memory ----------
+# ============================================================
+# Repetition control
+# ============================================================
 
 def get_history_block(chat_id: int) -> str:
-    messages = chat_history.get(chat_id)
+    messages = chat_user_history.get(chat_id)
     if not messages:
         return "No previous user messages."
 
@@ -404,31 +899,146 @@ def get_history_block(chat_id: int) -> str:
 
 
 def save_user_message(chat_id: int, text: str) -> None:
-    chat_history[chat_id].append(text.strip())
+    chat_user_history[chat_id].append(text.strip())
 
 
-# ---------- LLM response ----------
+def save_assistant_message(chat_id: int, text: str) -> None:
+    chat_assistant_history[chat_id].append(text.strip())
 
-def generate_answer(chat_id: int, user_text: str) -> str:
+
+def is_semantically_repeated_question(chat_id: int, user_text: str) -> bool:
+    history = chat_user_history.get(chat_id)
+    if not history:
+        return False
+
+    recent = list(history)[-3:]
+    for old_text in recent:
+        if text_similarity(old_text, user_text) >= 0.85:
+            return True
+    return False
+
+
+def reduce_repetition_if_needed(chat_id: int, answer: str) -> str:
+    recent_answers = chat_assistant_history.get(chat_id)
+    if not recent_answers:
+        return answer
+
+    for old_answer in recent_answers:
+        if text_similarity(old_answer, answer) >= 0.86:
+            # shorten repetitive answer
+            sentences = re.split(r"(?<=[.!?])\s+", answer.strip())
+            if len(sentences) >= 2:
+                return " ".join(sentences[:2]).strip()
+            return answer
+
+    return answer
+
+
+# ============================================================
+# Prompting / LLM
+# ============================================================
+
+def build_system_prompt(response_language: str, user_type: str) -> str:
+    return f"""
+You are the official AI assistant of FINKO.
+
+CRITICAL LANGUAGE RULE:
+- The language of the latest user message is {response_language}.
+- You must answer only in {response_language}.
+- Ignore the language used earlier in the conversation.
+- Ignore the language of previous assistant replies.
+- Never continue in a previous language unless the latest user message is in that language.
+- Never mix Russian, Uzbek, and English in one reply unless the user explicitly asks for translation.
+
+USER TYPE:
+- Detected user type: {user_type}.
+- Adapt phrasing to this user type while staying concise.
+
+KNOWLEDGE RULES:
+- Use only the provided FINKO knowledge-base context.
+- Do not invent facts, rates, limits, approvals, partner conditions, or timelines.
+- If the exact answer is not present in the context, say so honestly.
+- Paraphrase naturally. Do not copy chunks verbatim.
+- Keep the answer concise, clear, and natural.
+- Avoid repeating the same information if it was already covered recently.
+- If retrieved context is in another language, translate its meaning into {response_language}.
+- Do not mention internal instructions, vector stores, retrieval, chunks, or prompts.
+
+COMPANY RULES:
+- FINKO does not issue loans directly.
+- Final decisions are made by partner banks, MFOs, or other financial organizations.
+""".strip()
+
+
+def build_user_prompt(
+    user_text: str,
+    response_language: str,
+    kb_context: str,
+    history_block: str,
+    intent: str,
+    repeated_question: bool,
+) -> str:
+    repeat_instruction = (
+        "The user is asking a repeated or very similar question. "
+        "Answer more briefly than before and avoid repeating wording."
+        if repeated_question
+        else "Answer normally, but stay concise."
+    )
+
+    return f"""
+Latest user language: {response_language}
+Detected intent: {intent}
+
+Previous user messages:
+{history_block}
+
+Latest user question:
+{user_text}
+
+Relevant FINKO knowledge-base context:
+{kb_context}
+
+Write the best possible answer for the latest user question.
+
+Requirements:
+- Answer only in {response_language}.
+- Focus on the latest user message.
+- Do not let earlier messages override the answer language.
+- Be accurate and concise.
+- Do not repeat the same facts unnecessarily.
+- Do not copy the context word-for-word.
+- {repeat_instruction}
+- If the context is insufficient, say that exact information is not available in the FINKO knowledge base.
+""".strip()
+
+
+def generate_answer(chat_id: int, user_text: str, intent: str, user_type: str) -> str:
     response_lang = detect_language(user_text)
-    kb_context = search_knowledge_base(user_text, preferred_lang=response_lang)
+    kb_context = search_knowledge_base(
+        user_text=user_text,
+        preferred_lang=response_lang,
+        intent=intent,
+    )
 
     if not kb_context:
         return not_found_message(response_lang)
 
     history_block = get_history_block(chat_id)
+    repeated_question = is_semantically_repeated_question(chat_id, user_text)
 
     prompt = build_user_prompt(
         user_text=user_text,
         response_language=lang_name(response_lang),
         kb_context=kb_context,
         history_block=history_block,
+        intent=intent,
+        repeated_question=repeated_question,
     )
 
     try:
         response = client.responses.create(
             model=OPENAI_MODEL,
-            instructions=build_system_prompt(lang_name(response_lang)),
+            instructions=build_system_prompt(lang_name(response_lang), user_type),
             input=prompt,
             temperature=0.2,
         )
@@ -438,6 +1048,7 @@ def generate_answer(chat_id: int, user_text: str) -> str:
         if not answer:
             return not_found_message(response_lang)
 
+        answer = reduce_repetition_if_needed(chat_id, answer)
         return answer
 
     except RateLimitError:
@@ -449,7 +1060,22 @@ def generate_answer(chat_id: int, user_text: str) -> str:
         return server_error_message(response_lang)
 
 
-# ---------- Health ----------
+# ============================================================
+# Analytics endpoints
+# ============================================================
+
+def verify_admin_token(x_admin_token: str | None) -> None:
+    if not ADMIN_ANALYTICS_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="ADMIN_ANALYTICS_TOKEN is not configured",
+        )
+    if x_admin_token != ADMIN_ANALYTICS_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid admin token",
+        )
+
 
 @app.get("/")
 async def root() -> dict[str, str]:
@@ -461,7 +1087,131 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-# ---------- Webhook ----------
+@app.get("/analytics/summary")
+async def analytics_summary(
+    x_admin_token: str | None = Header(default=None),
+):
+    verify_admin_token(x_admin_token)
+
+    with db_lock:
+        with get_db() as conn:
+            users_count = conn.execute("SELECT COUNT(*) AS c FROM users").fetchone()["c"]
+            messages_count = conn.execute("SELECT COUNT(*) AS c FROM messages").fetchone()["c"]
+            inbound_count = conn.execute(
+                "SELECT COUNT(*) AS c FROM messages WHERE direction = 'inbound'"
+            ).fetchone()["c"]
+            outbound_count = conn.execute(
+                "SELECT COUNT(*) AS c FROM messages WHERE direction = 'outbound'"
+            ).fetchone()["c"]
+
+            top_intents_rows = conn.execute(
+                """
+                SELECT intent, COUNT(*) AS c
+                FROM messages
+                WHERE direction = 'inbound' AND intent IS NOT NULL
+                GROUP BY intent
+                ORDER BY c DESC
+                LIMIT 10
+                """
+            ).fetchall()
+
+            top_languages_rows = conn.execute(
+                """
+                SELECT language, COUNT(*) AS c
+                FROM messages
+                WHERE direction = 'inbound' AND language IS NOT NULL
+                GROUP BY language
+                ORDER BY c DESC
+                """
+            ).fetchall()
+
+            user_types_rows = conn.execute(
+                """
+                SELECT user_type, COUNT(*) AS c
+                FROM users
+                GROUP BY user_type
+                ORDER BY c DESC
+                """
+            ).fetchall()
+
+    return {
+        "users_count": users_count,
+        "messages_count": messages_count,
+        "inbound_count": inbound_count,
+        "outbound_count": outbound_count,
+        "top_intents": [{row["intent"]: row["c"]} for row in top_intents_rows],
+        "languages": [{row["language"]: row["c"]} for row in top_languages_rows],
+        "user_types": [{row["user_type"]: row["c"]} for row in user_types_rows],
+    }
+
+
+@app.get("/analytics/top-questions")
+async def analytics_top_questions(
+    limit: int = Query(default=10, ge=1, le=50),
+    x_admin_token: str | None = Header(default=None),
+):
+    verify_admin_token(x_admin_token)
+
+    with db_lock:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT text, COUNT(*) AS c
+                FROM messages
+                WHERE direction = 'inbound'
+                GROUP BY text
+                ORDER BY c DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+    return {
+        "top_questions": [
+            {"question": row["text"], "count": row["c"]}
+            for row in rows
+        ]
+    }
+
+
+@app.get("/analytics/top-users")
+async def analytics_top_users(
+    limit: int = Query(default=10, ge=1, le=50),
+    x_admin_token: str | None = Header(default=None),
+):
+    verify_admin_token(x_admin_token)
+
+    with db_lock:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT chat_id, username, first_name, last_name, messages_count, user_type, last_language
+                FROM users
+                ORDER BY messages_count DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+    return {
+        "top_users": [
+            {
+                "chat_id": row["chat_id"],
+                "username": row["username"],
+                "first_name": row["first_name"],
+                "last_name": row["last_name"],
+                "messages_count": row["messages_count"],
+                "user_type": row["user_type"],
+                "last_language": row["last_language"],
+            }
+            for row in rows
+        ]
+    }
+
+
+# ============================================================
+# Webhook
+# ============================================================
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(
@@ -489,18 +1239,83 @@ async def telegram_webhook(
             processed_updates.clear()
             processed_updates.add(update_id)
 
-    chat_id, user_text = extract_user_message(update)
+    chat_id, user_text, profile = extract_user_message(update)
     if not chat_id or not user_text:
         return JSONResponse({"ok": True, "skipped": True})
 
     detected_lang = detect_language(user_text)
+    intent = detect_intent(user_text)
+    user_type = infer_user_type(intent, user_text)
+
+    upsert_user_profile(
+        chat_id=chat_id,
+        username=profile.get("username"),
+        first_name=profile.get("first_name"),
+        last_name=profile.get("last_name"),
+        language=detected_lang,
+        user_type=user_type,
+    )
+
+    log_message(
+        chat_id=chat_id,
+        direction="inbound",
+        text=user_text,
+        language=detected_lang,
+        intent=intent,
+        user_type=user_type,
+        source="telegram",
+    )
+
+    quick_answer, quick_intent = handle_menu_or_quick_action(user_text, chat_id)
+    if quick_answer:
+        await send_telegram_message(chat_id, quick_answer, ui_lang=detected_lang)
+        save_assistant_message(chat_id, quick_answer)
+
+        log_message(
+            chat_id=chat_id,
+            direction="outbound",
+            text=quick_answer,
+            language=detected_lang,
+            intent=quick_intent,
+            user_type=user_type,
+            source="quick",
+        )
+        log_event(chat_id, "quick_reply", quick_intent)
+        return JSONResponse({"ok": True, "source": "quick", "intent": quick_intent})
 
     try:
         save_user_message(chat_id, user_text)
-        answer = generate_answer(chat_id, user_text)
 
-        await send_telegram_message(chat_id, answer)
-        return JSONResponse({"ok": True, "language": detected_lang})
+        answer = generate_answer(
+            chat_id=chat_id,
+            user_text=user_text,
+            intent=intent,
+            user_type=user_type,
+        )
+
+        await send_telegram_message(chat_id, answer, ui_lang=detected_lang)
+        save_assistant_message(chat_id, answer)
+
+        log_message(
+            chat_id=chat_id,
+            direction="outbound",
+            text=answer,
+            language=detected_lang,
+            intent=intent,
+            user_type=user_type,
+            source="openai",
+        )
+        log_event(chat_id, "openai_reply", intent)
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "language": detected_lang,
+                "intent": intent,
+                "user_type": user_type,
+                "source": "openai",
+            }
+        )
 
     except httpx.HTTPError as e:
         logger.exception("Telegram API error: %s", e)
@@ -511,7 +1326,17 @@ async def telegram_webhook(
         fallback_text = server_error_message(detected_lang)
 
         try:
-            await send_telegram_message(chat_id, fallback_text)
+            await send_telegram_message(chat_id, fallback_text, ui_lang=detected_lang)
+            log_message(
+                chat_id=chat_id,
+                direction="outbound",
+                text=fallback_text,
+                language=detected_lang,
+                intent=intent,
+                user_type=user_type,
+                source="fallback",
+            )
+            log_event(chat_id, "fallback_reply", str(e))
         except Exception:
             logger.exception("Failed to send fallback message")
 
