@@ -492,7 +492,7 @@ def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
             "business": "Biznes",
             "partners": "Hamkorlarga",
             "restart": "Restart",
-            "contacts": "Kontakti",
+            "contacts": "Kontaktlar",
             "placeholder": "Savolingizni yozing...",
         },
         "en": {
