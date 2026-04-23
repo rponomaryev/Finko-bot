@@ -61,6 +61,13 @@ Javob: Yo'q. Barcha jarayonlar onlayn amalga oshiriladi. Shaxsiy ishtirok faqat 
 Savol: Ariza ko'rib chiqish qancha vaqt oladi?
 Javob: Mahsulot va bankka qarab farq qiladi. Mikrokreditlar - bir necha soat. Iste'mol kreditlari — bir necha soatdan 1–3 ish kunigacha. Biznes kreditlari va lizing — 1 kundan 5–7 ish kunigacha.
 
+Savol: Kompaniya qachon ochildi?
+Javob: Kompaniya 2025 yil oktabr oyida ochildi.
+
+Savol: Kredit stavkalaringiz qanday?
+Javob: Kredit va zayomlar bo'yicha stavkalar muayyan bank yoki MFT-sherik shartlariga bog'liq va farq qilishi mumkin. Aniq minimal stavkalar FINKO platformasida ko'rsatilgan.
+Kompaniya sayti: https://finko.uz/uz
+
 Savol: Ariza holatini qanday bilish mumkin?
 Javob: Holat shaxsiy kabinetda mavjud. Har bir o'zgarish haqida email va SMS bildirishnomalar ham yuboriladi.
 

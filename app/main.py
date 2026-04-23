@@ -769,22 +769,22 @@ def build_quick_answer(action: str, lang: str) -> str:
         },
         "partners_menu": {
             "ru": (
-                "FINKO сотрудничает с Hamkorbank, Universal Bank, Davr-Bank и Madad Invest Bank, "
+                "FINKO сотрудничает с Hamkorbank, Universal Bank, DavrBank и Madad Invest Bank, "
                 "а также с МФО DELTA, PULMAN, APEX MOLIYA, ANSOR и ALMIZAN. Количество партнёрских "
                 "организаций постоянно увеличивается."
             ),
             "uz_latn": (
-                "FINKO Hamkorbank, Universal Bank, Davr-Bank va Madad Invest Bank bilan, "
+                "FINKO Hamkorbank, Universal Bank, DavrBank va Madad Invest Bank bilan, "
                 "shuningdek DELTA, PULMAN, APEX MOLIYA, ANSOR va ALMIZAN kabi MMTlar bilan "
                 "hamkorlik qiladi. Hamkor tashkilotlar soni doimiy ravishda oshib bormoqda."
             ),
             "uz_cyrl": (
-                "FINKO Hamkorbank, Universal Bank, Davr-Bank ва Madad Invest Bank билан, "
+                "FINKO Hamkorbank, Universal Bank, DavrBank ва Madad Invest Bank билан, "
                 "шунингдек DELTA, PULMAN, APEX MOLIYA, ANSOR ва ALMIZAN каби ММТлар билан "
                 "ҳамкорлик қилади. Ҳамкор ташкилотлар сони доимий равишда ошиб бормоқда."
             ),
             "en": (
-                "FINKO works with Hamkorbank, Universal Bank, Davr-Bank, and Madad Invest Bank, "
+                "FINKO works with Hamkorbank, Universal Bank, DavrBank, and Madad Invest Bank, "
                 "as well as the MFOs DELTA, PULMAN, APEX MOLIYA, ANSOR, and ALMIZAN. The number "
                 "of partner organizations is continuously growing."
             ),
