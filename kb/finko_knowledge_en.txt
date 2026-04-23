@@ -61,6 +61,13 @@ A: No. All processes take place online. In-person presence may only be required 
 Q: How long does it take to process an application?
 A: It depends on the product and the bank. Microloans - a few hours. Consumer loans - from a few hours to 1–3 business days. Business loans and leasing — from 1 to 5–7 business days.
 
+Q: When did the company open?**
+A: The company opened in October 2025.
+
+Q: What are your loan interest rates?**
+A: Interest rates on loans depend on the terms of the specific partner bank or MFO and may vary. Exact minimum rates are listed on the FINKO platform.
+Company website: https://finko.uz/uz
+
 Q: How can I check the status of my application?
 A: The status is available in your personal account. You will also receive email and SMS notifications for every status change.
 
@@ -154,5 +161,3 @@ Office: Tashkent, Mirobod district, Oybek St. 18/1, ATRIUM Business Center
 Website: https://finko.uz/en
 
 If a user's question cannot be answered based on the knowledge base, inform them honestly and suggest contacting FINKO via the details above.
-
-Link on the company web site: https://finko.uz/ru

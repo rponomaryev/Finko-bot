@@ -691,28 +691,36 @@ def build_quick_answer(action: str, lang: str) -> str:
                 "Телефон: +998 50 177 77 88\n"
                 "Email: info@finko.uz\n"
                 "Сайт: https://finko.uz\n"
-                "Офис: Ташкент, ул. Ойбек 18/1, БЦ ATRIUM"
+                "Офис: Ташкент, ул. Ойбек 18/1, БЦ ATRIUM\n"
+                "Telegram: https://t.me/finkouz\n"
+                "Рабочее время: с понедельника по пятницу, с 9.00 до 18.00"
             ),
             "uz_latn": (
                 "FINKO kontaktlari:\n"
                 "Telefon: +998 50 177 77 88\n"
                 "Email: info@finko.uz\n"
                 "Sayt: https://finko.uz\n"
-                "Ofis: Toshkent, Oybek 18/1, ATRIUM"
+                "Ofis: Toshkent, Oybek 18/1, ATRIUM\n"
+                "Telegram: https://t.me/finkouz\n"
+                "Ish vaqti: dushanbadan jumagacha, soat 9:00 dan 18:00 gacha"
             ),
             "uz_cyrl": (
                 "FINKO контактлари:\n"
                 "Телефон: +998 50 177 77 88\n"
                 "Email: info@finko.uz\n"
                 "Сайт: https://finko.uz\n"
-                "Офис: Тошкент, Ойбек 18/1, ATRIUM"
+                "Офис: Тошкент, Ойбек 18/1, ATRIUM\n"
+                "Telegram: https://t.me/finkouz\n"
+                "Иш вақти: душанбадан жумагача, соат 9:00 дан 18:00 гача"
             ),
             "en": (
                 "FINKO contacts:\n"
                 "Phone: +998 50 177 77 88\n"
                 "Email: info@finko.uz\n"
                 "Website: https://finko.uz\n"
-                "Office: Tashkent, Oybek 18/1, ATRIUM"
+                "Office: Tashkent, Oybek 18/1, ATRIUM\n"
+                "Telegram: https://t.me/finkouz\n"
+                "Working hours: Monday to Friday, from 9:00 to 18:00"
             ),
         },
         "credits_menu": {
@@ -740,23 +748,23 @@ def build_quick_answer(action: str, lang: str) -> str:
         "business_menu": {
             "ru": (
                 "Для бизнеса через FINKO доступны бизнес-кредиты, оборотные и инвестиционные "
-                "кредиты, лизинг, страхование и другие решения. Итоговые условия определяются "
-                "партнёрской организацией."
+                "кредиты, лизинг, вклады, страхование и другие решения."
+                "Итоговые условия определяются партнёрской организацией."
             ),
             "uz_latn": (
                 "Biznes uchun FINKO orqali biznes kreditlari, aylanma va investitsiya "
-                "kreditlari, lizing, sug'urta va boshqa yechimlar mavjud. Yakuniy shartlar "
-                "hamkor tashkilot tomonidan belgilanadi."
+                "kreditlari, lizing, depozitlar, sug'urta va boshqa yechimlar mavjud. "
+                "Yakuniy shartlar hamkor tashkilot tomonidan belgilanadi."
             ),
             "uz_cyrl": (
                 "Бизнес учун FINKO орқали бизнес кредитлари, айланма ва инвестиция "
-                "кредитлари, лизинг, суғурта ва бошқа ечимлар мавжуд. Якуний шартлар "
-                "ҳамкор ташкилот томонидан белгиланади."
+                "кредитлари, лизинг, депозитлар, суғурта ва бошқа ечимлар мавжуд. "
+                "Якуний шартлар ҳамкор ташкилот томонидан белгиланади."
             ),
             "en": (
                 "For businesses, FINKO offers access to business loans, working capital and "
-                "investment loans, leasing, insurance, and related solutions. Final terms are "
-                "set by the partner organization."
+                "investment loans, leasing, deposits, insurance, and related solutions. "
+                "Final terms are set by the partner organization."
             ),
         },
         "partners_menu": {
