@@ -346,7 +346,7 @@ def detect_language(text: str) -> str:
     lowered = text.lower().strip()
 
     if not lowered:
-        return "ru"
+        return "unknown"
 
     if UZ_CYR_SPECIFIC_RE.search(text):
         return "uz_cyrl"
@@ -359,21 +359,43 @@ def detect_language(text: str) -> str:
     uz_score = len(UZ_LATN_HINTS_RE.findall(lowered))
     en_score = len(EN_HINTS_RE.findall(lowered))
 
-    if any(x in lowered for x in ["o'", "g'", "yo'q", "ya'ni"]):
+    if any(x in lowered for x in ["o'", "g'", "yo'q", "ya'ni", "o‘z", "g‘", "yo‘q"]):
         uz_score += 3
 
     if en_score > uz_score:
         return "en"
+
     if uz_score > en_score:
         return "uz_latn"
 
     if LATIN_RE.search(text):
-        common_en = {"the", "what", "which", "hello", "hi", "bank", "banks", "contacts"}
-        if any(word in lowered.split() for word in common_en):
-            return "en"
-        return "uz_latn"
+        words = set(re.findall(r"[a-zA-Z']+", lowered))
 
-    return "ru"
+        common_en = {
+            "the", "what", "which", "hello", "hi", "bank", "banks",
+            "contacts", "contact", "support", "operator", "status",
+            "credit", "loan", "loans", "business", "partners", "help",
+            "yes", "no", "ok", "okay", "thanks", "thank", "you",
+            "application", "apply", "office", "address"
+        }
+
+        common_uz = {
+            "salom", "assalomu", "rahmat", "kredit", "kreditlar", "biznes",
+            "hamkorlar", "ariza", "aloqa", "kontaktlar", "kerak", "mumkin",
+            "ha", "yoq", "yo'q", "yordam", "mijoz", "foiz", "muddat",
+            "shartlar", "hujjat", "mfo", "mmt", "mikrozaym", "ipoteka",
+            "avtokredit"
+        }
+
+        if words & common_en and not words & common_uz:
+            return "en"
+
+        if words & common_uz and not words & common_en:
+            return "uz_latn"
+
+        return "unknown"
+
+    return "unknown"
 
 
 def lang_name(lang: str) -> str:
@@ -444,6 +466,14 @@ def text_similarity(a: str, b: str) -> float:
 
 def detect_intent(user_text: str) -> str:
     text = normalize_text_for_match(user_text)
+
+    if text in {
+        "/question", "/ask", "ask a question", "insert my question", "write a question",
+        "задать вопрос", "ввести вопрос", "написать вопрос", "свой вопрос",
+        "savol yozish", "savol berish", "savolim bor", "savol yuborish",
+        "савол ёзиш", "савол бериш", "саволим бор", "савол юбориш"
+    }:
+        return "insert_question"
 
     if text in {
         "/start", "/restart", "restart", "перезапуск", "qayta", "qayta ishga tushirish",
@@ -544,7 +574,7 @@ def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
             "credits": "Кредиты",
             "business": "Бизнес",
             "partners": "Партнёры",
-            "restart": "Restart",
+            "ask_question": "Задать вопрос",
             "contacts": "Контакты",
             "placeholder": "Напишите вопрос...",
         },
@@ -552,7 +582,7 @@ def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
             "credits": "Kreditlar",
             "business": "Biznes",
             "partners": "Hamkorlar",
-            "restart": "Restart",
+            "ask_question": "Savol yozish",
             "contacts": "Kontaktlar",
             "placeholder": "Savolingizni yozing...",
         },
@@ -560,7 +590,7 @@ def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
             "credits": "Кредитлар",
             "business": "Бизнес",
             "partners": "Ҳамкорлар",
-            "restart": "Restart",
+            "ask_question": "Савол ёзиш",
             "contacts": "Контактлар",
             "placeholder": "Саволингизни ёзинг...",
         },
@@ -568,7 +598,7 @@ def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
             "credits": "Credits",
             "business": "Business",
             "partners": "Partners",
-            "restart": "Restart",
+            "ask_question": "Ask a question",
             "contacts": "Contacts",
             "placeholder": "Write a message...",
         },
@@ -578,7 +608,7 @@ def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
         "keyboard": [
             [{"text": labels["credits"]}, {"text": labels["business"]}],
             [{"text": labels["partners"]}],
-            [{"text": labels["restart"]}, {"text": labels["contacts"]}],
+            [{"text": labels["ask_question"]}, {"text": labels["contacts"]}],
         ],
         "resize_keyboard": True,
         "persistent_keyboard": True,
@@ -633,6 +663,13 @@ def build_start_language_text() -> str:
     )
 
 
+def build_language_clarification_text() -> str:
+    return (
+        "На каком языке вам удобно получить ответ?\n\n"
+        "Русский / O‘zbekcha (lotin) / Ўзбекча (кирилл) / English"
+    )
+
+
 async def send_telegram_message(
     chat_id: int,
     text: str,
@@ -684,6 +721,12 @@ def build_quick_answer(action: str, lang: str) -> str:
             "uz_latn": "Bot qayta ishga tushdi. Yangi savol yuborishingiz mumkin.",
             "uz_cyrl": "Бот қайта ишга тушди. Янги савол юборишингиз мумкин.",
             "en": "The bot has been restarted. You can send a new question.",
+        },
+        "insert_question": {
+            "ru": "Напишите ваш вопрос одним сообщением. Я определю язык вопроса и отвечу на этом языке.",
+            "uz_latn": "Savolingizni bitta xabarda yozing. Men savol tilini aniqlab, shu tilda javob beraman.",
+            "uz_cyrl": "Саволингизни битта хабарда ёзинг. Мен савол тилини аниқлаб, шу тилда жавоб бераман.",
+            "en": "Please write your question in one message. I will detect the language and reply in that language.",
         },
         "contacts": {
             "ru": (
@@ -813,7 +856,7 @@ def should_use_quick_reply(intent: str, user_text: str) -> bool:
     text = normalize_text_for_match(user_text)
 
     if intent in {
-        "restart", "contacts", "credits_menu", "business_menu", "partners_menu",
+        "restart", "insert_question", "contacts", "credits_menu", "business_menu", "partners_menu",
         "greeting", "thanks"
     }:
         return True
@@ -1212,9 +1255,13 @@ Requirements:
 """.strip()
 
 
-def generate_answer(chat_id: int, user_text: str, intent: str, user_type: str) -> str:
-    response_lang = resolve_response_language_for_message(user_text)
-
+def generate_answer(
+    chat_id: int,
+    user_text: str,
+    intent: str,
+    user_type: str,
+    response_lang: str,
+) -> str:
     kb_context = search_knowledge_base(
         user_text=user_text,
         preferred_lang=response_lang,
@@ -2093,7 +2140,24 @@ async def telegram_webhook(
         return JSONResponse({"ok": True, "selected_language": selected_lang})
 
     message_lang = detect_language(user_text)
-    ui_lang = get_user_ui_language(chat_id) or message_lang
+    selected_ui_lang = get_user_ui_language(chat_id)
+
+    if message_lang == "unknown":
+        fallback_ui_lang = selected_ui_lang or "ru"
+
+        await send_telegram_message(
+            chat_id,
+            build_language_clarification_text(),
+            ui_lang=fallback_ui_lang,
+            custom_keyboard=get_language_keyboard(),
+        )
+
+        log_event(chat_id, "language_clarification_requested", user_text)
+        return JSONResponse({"ok": True, "source": "language_clarification"})
+
+    ui_lang = selected_ui_lang or message_lang
+    response_lang = message_lang
+
     intent = detect_intent(user_text)
     user_type = infer_user_type(intent, user_text)
 
@@ -2142,6 +2206,7 @@ async def telegram_webhook(
             user_text=user_text,
             intent=intent,
             user_type=user_type,
+            response_lang=response_lang,
         )
 
         await send_telegram_message(chat_id, answer, ui_lang=ui_lang)
@@ -2162,6 +2227,7 @@ async def telegram_webhook(
             {
                 "ok": True,
                 "message_language": message_lang,
+                "response_language": response_lang,
                 "ui_language": ui_lang,
                 "intent": intent,
                 "user_type": user_type,
