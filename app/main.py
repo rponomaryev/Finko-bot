@@ -362,6 +362,11 @@ def detect_language(text: str) -> str:
     if any(x in lowered for x in ["o'", "g'", "yo'q", "ya'ni", "o‘z", "g‘", "yo‘q"]):
         uz_score += 3
 
+    # Uzbek Latin often appears in short practical requests without apostrophes:
+    # "kredit kerak", "qarz kerak", "kontakt kerak", etc.
+    if re.search(r"\b(kredit|kreditlar|qarz|kerak|menga|olmoqchiman|bering|bormi|qayerda|qanday)\b", lowered):
+        uz_score += 2
+
     if en_score > uz_score:
         return "en"
 
@@ -668,6 +673,28 @@ def build_language_clarification_text() -> str:
         "На каком языке вам удобно получить ответ?\n\n"
         "Русский / O‘zbekcha (lotin) / Ўзбекча (кирилл) / English"
     )
+
+
+def strip_cross_language_artifacts(answer: str, lang: str) -> str:
+    """
+    Final lightweight guard against accidental language mixing.
+    It does not translate; it only removes common meta-prefixes and keeps the answer clean.
+    The main language control is done before generation by using the latest message language.
+    """
+    if not answer:
+        return answer
+
+    cleaned = answer.strip()
+
+    # Remove common assistant/meta prefixes if a model ever adds them.
+    cleaned = re.sub(
+        r"^(answer|response|ответ|javob|ж[ао]воб)\s*[:：]\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    return cleaned
 
 
 async def send_telegram_message(
@@ -1297,6 +1324,7 @@ def generate_answer(
             return not_found_message(response_lang)
 
         answer = reduce_repetition_if_needed(chat_id, answer)
+        answer = strip_cross_language_artifacts(answer, response_lang)
         return answer
 
     except RateLimitError:
@@ -2181,7 +2209,9 @@ async def telegram_webhook(
         source="telegram",
     )
 
-    quick_answer, quick_intent = handle_menu_or_quick_action(user_text, chat_id, ui_lang)
+    # Quick replies must follow the language of the latest user message, not the saved UI language.
+    # Example: if UI is Russian but user writes "kredit kerak", answer in Uzbek Latin.
+    quick_answer, quick_intent = handle_menu_or_quick_action(user_text, chat_id, response_lang)
     if quick_answer:
         await send_telegram_message(chat_id, quick_answer, ui_lang=ui_lang)
         save_assistant_message(chat_id, quick_answer)
@@ -2190,7 +2220,7 @@ async def telegram_webhook(
             chat_id=chat_id,
             direction="outbound",
             text=quick_answer,
-            language=ui_lang,
+            language=response_lang,
             intent=quick_intent,
             user_type=user_type,
             source="quick",
