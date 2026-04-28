@@ -934,9 +934,12 @@ def handle_menu_or_quick_action(
 # Keywords indicating a calculation request
 _CALC_RE = re.compile(
     r"рассчита|посчита|график\s*платеж|график\s*погашени|выплат|ежемесячн|"
+    r"сколько\s*(?:мне\s*)?(?:платить|платеж)|платить\s*в\s*месяц|"
     r"hisob|grafik|oylik\s*to'lov|oylik\s*hisob|"
+    r"qancha\s*to'layman|qancha\s*tolov|"
     r"ҳисоб|жадвал|ойлик\s*тўлов|"
-    r"calculat|payment\s*schedul|monthly\s*payment|amortiz",
+    r"қанча\s*тўлайман|"
+    r"calculat|payment\s*schedul|monthly\s*payment|how\s*much\s*per\s*month",
     re.IGNORECASE,
 )
 
@@ -1241,6 +1244,16 @@ def handle_loan_calc(chat_id: int, user_text: str, lang: str) -> str | None:
     or the payment-type clarification question, or None if not a calc request.
     """
     pending = chat_loan_calc_pending.get(chat_id)
+
+    # If user replied only with payment type, but pending state was lost
+    if not pending and detect_payment_type(user_text):
+        messages = {
+            "ru": "Пожалуйста, укажите параметры кредита: сумму, срок и процентную ставку.",
+            "uz_latn": "Iltimos, kredit parametrlarini kiriting: summa, muddat va foiz stavkasi.",
+            "uz_cyrl": "Илтимос, кредит параметрларини киритинг: сумма, муддат ва фоиз ставкаси.",
+            "en": "Please provide the loan details: amount, term, and interest rate.",
+        }
+        return messages.get(lang, messages["ru"])
 
     # --- User is answering our payment-type question ---
     if pending:
