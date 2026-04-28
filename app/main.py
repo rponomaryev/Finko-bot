@@ -1110,98 +1110,125 @@ def format_loan_schedule(
 ) -> str:
     total_payment = sum(r["payment"] for r in schedule)
     total_interest = sum(r["interest"] for r in schedule)
-    show_full = months <= 12
     link = platform_link(lang)
 
-    def row_str(r: dict) -> str:
-        return (
-            f"{r['month']:>2}  {_fmt(r['payment']):>14}  "
-            f"{_fmt(r['interest']):>13}  {_fmt(r['principal']):>13}  "
-            f"{_fmt(r['balance']):>14}\n"
-        )
-
-    def build_table() -> str:
-        body = ""
-        if show_full:
-            for r in schedule:
-                body += row_str(r)
-        else:
-            for r in schedule[:3]:
-                body += row_str(r)
-            body += "   ...\n"
-            for r in schedule[-3:]:
-                body += row_str(r)
-        return body
+    first_payment = schedule[0]["payment"]
+    last_payment = schedule[-1]["payment"]
 
     if lang == "ru":
-        type_name = "Аннуитетный" if payment_type == "annuity" else "Дифференцированный"
-        header = (
-            f"📊 {type_name} расчёт\n"
-            f"Сумма: {_fmt(amount)} сум | Ставка: {rate}% год. | Срок: {months} мес.\n\n"
-            f"{'№':>2}  {'Платёж':>14}  {'Проценты':>13}  {'Осн. долг':>13}  {'Остаток':>14}\n"
-            f"{'—'*62}\n"
-        )
-        footer = (
-            f"{'—'*62}\n"
-            f"Итого выплат:    {_fmt(total_payment)} сум\n"
-            f"Из них проценты: {_fmt(total_interest)} сум\n\n"
-            f"⚠️ Это ориентировочный расчёт. Точные условия, комиссии и итоговый "
-            f"график определяются банком или МФО.\n\n"
+        if payment_type == "annuity":
+            return (
+                f"📊 Аннуитетный расчёт\n\n"
+                f"Сумма кредита: {_fmt(amount)} сум\n"
+                f"Срок: {months} месяцев\n"
+                f"Ставка: {rate}% годовых\n\n"
+                f"Ежемесячный платёж: примерно {_fmt(first_payment)} сум\n"
+                f"Итого выплат: {_fmt(total_payment)} сум\n"
+                f"Переплата по процентам: {_fmt(total_interest)} сум\n\n"
+                f"⚠️ Это ориентировочный расчёт. Точные условия, комиссии и итоговый график "
+                f"определяются банком или МФО.\n\n"
+                f"Подать заявку: {link}"
+            )
+
+        return (
+            f"📊 Дифференцированный расчёт\n\n"
+            f"Сумма кредита: {_fmt(amount)} сум\n"
+            f"Срок: {months} месяцев\n"
+            f"Ставка: {rate}% годовых\n\n"
+            f"Первый платёж: примерно {_fmt(first_payment)} сум\n"
+            f"Последний платёж: примерно {_fmt(last_payment)} сум\n"
+            f"Итого выплат: {_fmt(total_payment)} сум\n"
+            f"Переплата по процентам: {_fmt(total_interest)} сум\n\n"
+            f"⚠️ Это ориентировочный расчёт. Точные условия, комиссии и итоговый график "
+            f"определяются банком или МФО.\n\n"
             f"Подать заявку: {link}"
         )
 
-    elif lang == "uz_latn":
-        type_name = "Annuitet" if payment_type == "annuity" else "Differensial"
-        header = (
-            f"📊 {type_name} hisob-kitob\n"
-            f"Summa: {_fmt(amount)} so'm | Stavka: {rate}% yil. | Muddat: {months} oy\n\n"
-            f"{'№':>2}  {'To\'lov':>14}  {'Foiz':>13}  {'Asosiy':>13}  {'Qoldiq':>14}\n"
-            f"{'—'*62}\n"
-        )
-        footer = (
-            f"{'—'*62}\n"
-            f"Jami to'lov:  {_fmt(total_payment)} so'm\n"
-            f"Shundan foiz: {_fmt(total_interest)} so'm\n\n"
-            f"⚠️ Bu taxminiy hisob-kitob. Aniq shartlar, komissiyalar va yakuniy "
-            f"jadval bank yoki MMT tomonidan belgilanadi.\n\n"
+    if lang == "uz_latn":
+        if payment_type == "annuity":
+            return (
+                f"📊 Annuitet hisob-kitob\n\n"
+                f"Kredit summasi: {_fmt(amount)} so'm\n"
+                f"Muddat: {months} oy\n"
+                f"Stavka: {rate}% yillik\n\n"
+                f"Oylik to'lov: taxminan {_fmt(first_payment)} so'm\n"
+                f"Jami to'lov: {_fmt(total_payment)} so'm\n"
+                f"Foiz bo'yicha ortiqcha to'lov: {_fmt(total_interest)} so'm\n\n"
+                f"⚠️ Bu taxminiy hisob-kitob. Aniq shartlar, komissiyalar va yakuniy grafik "
+                f"bank yoki MMT tomonidan belgilanadi.\n\n"
+                f"Ariza topshirish: {link}"
+            )
+
+        return (
+            f"📊 Differensial hisob-kitob\n\n"
+            f"Kredit summasi: {_fmt(amount)} so'm\n"
+            f"Muddat: {months} oy\n"
+            f"Stavka: {rate}% yillik\n\n"
+            f"Birinchi to'lov: taxminan {_fmt(first_payment)} so'm\n"
+            f"Oxirgi to'lov: taxminan {_fmt(last_payment)} so'm\n"
+            f"Jami to'lov: {_fmt(total_payment)} so'm\n"
+            f"Foiz bo'yicha ortiqcha to'lov: {_fmt(total_interest)} so'm\n\n"
+            f"⚠️ Bu taxminiy hisob-kitob. Aniq shartlar, komissiyalar va yakuniy grafik "
+            f"bank yoki MMT tomonidan belgilanadi.\n\n"
             f"Ariza topshirish: {link}"
         )
 
-    elif lang == "uz_cyrl":
-        type_name = "Аннуитет" if payment_type == "annuity" else "Дифференциал"
-        header = (
-            f"📊 {type_name} ҳисоб-китоб\n"
-            f"Сумма: {_fmt(amount)} сўм | Ставка: {rate}% йил. | Муддат: {months} ой\n\n"
-            f"{'№':>2}  {'Тўлов':>14}  {'Фоиз':>13}  {'Асосий':>13}  {'Қолдиқ':>14}\n"
-            f"{'—'*62}\n"
-        )
-        footer = (
-            f"{'—'*62}\n"
-            f"Жами тўлов:  {_fmt(total_payment)} сўм\n"
-            f"Шундан фоиз: {_fmt(total_interest)} сўм\n\n"
-            f"⚠️ Бу тахминий ҳисоб-китоб. Аниқ шартлар, комиссиялар ва якуний "
-            f"жадвал банк ёки ММТ томонидан белгиланади.\n\n"
+    if lang == "uz_cyrl":
+        if payment_type == "annuity":
+            return (
+                f"📊 Аннуитет ҳисоб-китоб\n\n"
+                f"Кредит суммаси: {_fmt(amount)} сўм\n"
+                f"Муддат: {months} ой\n"
+                f"Ставка: {rate}% йиллик\n\n"
+                f"Ойлик тўлов: тахминан {_fmt(first_payment)} сўм\n"
+                f"Жами тўлов: {_fmt(total_payment)} сўм\n"
+                f"Фоиз бўйича ортиқча тўлов: {_fmt(total_interest)} сўм\n\n"
+                f"⚠️ Бу тахминий ҳисоб-китоб. Аниқ шартлар, комиссиялар ва якуний график "
+                f"банк ёки ММТ томонидан белгиланади.\n\n"
+                f"Ариза топшириш: {link}"
+            )
+
+        return (
+            f"📊 Дифференциал ҳисоб-китоб\n\n"
+            f"Кредит суммаси: {_fmt(amount)} сўм\n"
+            f"Муддат: {months} ой\n"
+            f"Ставка: {rate}% йиллик\n\n"
+            f"Биринчи тўлов: тахминан {_fmt(first_payment)} сўм\n"
+            f"Охирги тўлов: тахминан {_fmt(last_payment)} сўм\n"
+            f"Жами тўлов: {_fmt(total_payment)} сўм\n"
+            f"Фоиз бўйича ортиқча тўлов: {_fmt(total_interest)} сўм\n\n"
+            f"⚠️ Бу тахминий ҳисоб-китоб. Аниқ шартлар, комиссиялар ва якуний график "
+            f"банк ёки ММТ томонидан белгиланади.\n\n"
             f"Ариза топшириш: {link}"
         )
 
-    else:  # en
-        type_name = "Annuity" if payment_type == "annuity" else "Differentiated"
-        header = (
-            f"📊 {type_name} schedule\n"
-            f"Amount: {_fmt(amount)} UZS | Rate: {rate}% p.a. | Term: {months} months\n\n"
-            f"{'Mo':>2}  {'Payment':>14}  {'Interest':>13}  {'Principal':>13}  {'Balance':>14}\n"
-            f"{'—'*62}\n"
-        )
-        footer = (
-            f"{'—'*62}\n"
-            f"Total payments:   {_fmt(total_payment)} UZS\n"
-            f"Of which interest:{_fmt(total_interest)} UZS\n\n"
-            f"⚠️ This is an estimated calculation. Actual terms, fees, and the "
-            f"final schedule are set by the bank or MFO.\n\n"
-            f"Apply now: {link}"
+    if payment_type == "annuity":
+        return (
+            f"📊 Annuity calculation\n\n"
+            f"Loan amount: {_fmt(amount)} UZS\n"
+            f"Term: {months} months\n"
+            f"Rate: {rate}% per year\n\n"
+            f"Monthly payment: about {_fmt(first_payment)} UZS\n"
+            f"Total payments: {_fmt(total_payment)} UZS\n"
+            f"Interest overpayment: {_fmt(total_interest)} UZS\n\n"
+            f"⚠️ This is an estimated calculation. Actual terms, fees, and the final schedule "
+            f"are set by the bank or MFO.\n\n"
+            f"Apply: {link}"
         )
 
-    return header + build_table() + footer
+    return (
+        f"📊 Differentiated calculation\n\n"
+        f"Loan amount: {_fmt(amount)} UZS\n"
+        f"Term: {months} months\n"
+        f"Rate: {rate}% per year\n\n"
+        f"First payment: about {_fmt(first_payment)} UZS\n"
+        f"Last payment: about {_fmt(last_payment)} UZS\n"
+        f"Total payments: {_fmt(total_payment)} UZS\n"
+        f"Interest overpayment: {_fmt(total_interest)} UZS\n\n"
+        f"⚠️ This is an estimated calculation. Actual terms, fees, and the final schedule "
+        f"are set by the bank or MFO.\n\n"
+        f"Apply: {link}"
+    )
 
 
 def ask_payment_type_message(lang: str) -> str:
@@ -1239,62 +1266,91 @@ def ask_payment_type_message(lang: str) -> str:
 
 
 def handle_loan_calc(chat_id: int, user_text: str, lang: str) -> str | None:
-    """
-    Returns formatted loan schedule string if a calculation was performed,
-    or the payment-type clarification question, or None if not a calc request.
-    """
     pending = chat_loan_calc_pending.get(chat_id)
+    params = parse_loan_params(user_text)
+    payment_type = detect_payment_type(user_text)
 
-    # If user replied only with payment type, but pending state was lost
-    if not pending and detect_payment_type(user_text):
+    # 1. User first selected payment type, then sent loan parameters.
+    if pending and params and pending.get("payment_type"):
+        saved_payment_type = pending["payment_type"]
+        del chat_loan_calc_pending[chat_id]
+
+        if saved_payment_type == "annuity":
+            schedule = calc_annuity(params["amount"], params["rate"], params["months"])
+        else:
+            schedule = calc_differentiated(params["amount"], params["rate"], params["months"])
+
+        return format_loan_schedule(
+            schedule,
+            saved_payment_type,
+            lang,
+            params["amount"],
+            params["rate"],
+            params["months"],
+        )
+
+    # 2. We already have loan parameters and are waiting for payment type.
+    if pending and payment_type and "amount" in pending and "rate" in pending and "months" in pending:
+        del chat_loan_calc_pending[chat_id]
+
+        if payment_type == "annuity":
+            schedule = calc_annuity(pending["amount"], pending["rate"], pending["months"])
+        else:
+            schedule = calc_differentiated(pending["amount"], pending["rate"], pending["months"])
+
+        return format_loan_schedule(
+            schedule,
+            payment_type,
+            lang,
+            pending["amount"],
+            pending["rate"],
+            pending["months"],
+        )
+
+    # 3. User sent only payment type without loan parameters.
+    if payment_type and not params:
+        chat_loan_calc_pending[chat_id] = {"payment_type": payment_type}
         messages = {
-            "ru": "Пожалуйста, укажите параметры кредита: сумму, срок и процентную ставку.",
-            "uz_latn": "Iltimos, kredit parametrlarini kiriting: summa, muddat va foiz stavkasi.",
-            "uz_cyrl": "Илтимос, кредит параметрларини киритинг: сумма, муддат ва фоиз ставкаси.",
-            "en": "Please provide the loan details: amount, term, and interest rate.",
+            "ru": "Хорошо. Теперь укажите сумму кредита, срок и процентную ставку. Например: 234000000 сум, 36 месяцев, 23%.",
+            "uz_latn": "Yaxshi. Endi kredit summasi, muddati va foiz stavkasini yozing. Masalan: 234000000 so'm, 36 oy, 23%.",
+            "uz_cyrl": "Яхши. Энди кредит суммаси, муддати ва фоиз ставкаcини ёзинг. Масалан: 234000000 сўм, 36 ой, 23%.",
+            "en": "Okay. Now send the loan amount, term, and interest rate. Example: 234000000 UZS, 36 months, 23%.",
         }
         return messages.get(lang, messages["ru"])
 
-    # --- User is answering our payment-type question ---
-    if pending:
-        payment_type = detect_payment_type(user_text)
-        if payment_type:
-            del chat_loan_calc_pending[chat_id]
-            if payment_type == "annuity":
-                schedule = calc_annuity(pending["amount"], pending["rate"], pending["months"])
-            else:
-                schedule = calc_differentiated(pending["amount"], pending["rate"], pending["months"])
-            return format_loan_schedule(
-                schedule, payment_type, lang,
-                pending["amount"], pending["rate"], pending["months"],
-            )
-        else:
-            # User wrote something unrelated — clear pending state, fall through
-            del chat_loan_calc_pending[chat_id]
-
-    # --- Check if this message is a new calc request ---
-    if not detect_loan_calc_request(user_text):
-        return None
-
-    params = parse_loan_params(user_text)
-    if not params:
-        # Looks like a calc request but params are missing — let OpenAI handle
-        return None
-
-    payment_type = detect_payment_type(user_text)
-    if payment_type:
+    # 4. User sent parameters and payment type in one message.
+    if params and payment_type:
         if payment_type == "annuity":
             schedule = calc_annuity(params["amount"], params["rate"], params["months"])
         else:
             schedule = calc_differentiated(params["amount"], params["rate"], params["months"])
+
         return format_loan_schedule(
-            schedule, payment_type, lang,
-            params["amount"], params["rate"], params["months"],
+            schedule,
+            payment_type,
+            lang,
+            params["amount"],
+            params["rate"],
+            params["months"],
         )
-    else:
-        # Ask which type
+
+    # 5. User sent parameters but did not specify payment type.
+    if params:
         chat_loan_calc_pending[chat_id] = params
         return ask_payment_type_message(lang)
+
+    # 6. User asks for a calculation but did not provide enough data.
+    if detect_loan_calc_request(user_text):
+        messages = {
+            "ru": "Укажите, пожалуйста, сумму кредита, срок и процентную ставку. Например: 234000000 сум, 36 месяцев, 23%.",
+            "uz_latn": "Iltimos, kredit summasi, muddati va foiz stavkasini yozing. Masalan: 234000000 so'm, 36 oy, 23%.",
+            "uz_cyrl": "Илтимос, кредит суммаси, муддати ва фоиз ставкаcини ёзинг. Масалан: 234000000 сўм, 36 ой, 23%.",
+            "en": "Please provide the loan amount, term, and interest rate. Example: 234000000 UZS, 36 months, 23%.",
+        }
+        return messages.get(lang, messages["ru"])
+
+    return None
+
 
 # ============================================================
 # KB search
