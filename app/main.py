@@ -963,53 +963,42 @@ def parse_loan_params(text: str) -> dict | None:
     """
     Extract amount (UZS), months, annual_rate (%) from free-form text.
     Returns {"amount": float, "months": int, "rate": float} or None.
+
+    Supports examples:
+    - "234000000 сум, 36 месяцев, 23%"
+    - "234000000, 36 месяцев, 23%"
+    - "Срок 36 месяцев, ставка 21%, сумма 234 000 000 сум, аннуитетная"
+    - "100 млн сум на 12 месяцев под 26%"
+    - "1.2 млрд сум, 60 месяцев, 21%"
     """
-    lowered = text.lower().replace("\xa0", " ").replace("_", "")
+    lowered = text.lower().replace("\xa0", " ").replace("_", " ")
 
-    # ---- Amount ----
-    amount: float | None = None
+    # Number token:
+    # - 127.000.000 / 127,000,000 / 127 000 000
+    # - 234000000
+    # - 1.2 / 1,2 for cases like "1.2 млрд"
+    number_re = r"(?:\d{1,3}(?:[., ]\d{3})+|\d+(?:[.,]\d+)?)"
 
-    # Pattern: number followed by currency or million/billion marker
-    # Handles: 127.000.000, 127,000,000, 127 000 000, 100 млн, 50 миллион
-    m = re.search(
-        r"([\d][\d\s.,]*)(?:\s*(?:млн\.?|миллион|миллиард|млрд\.?|mln\.?|million|milliard)\s*)?(?:сум|sum|uzs|so'm|сўм)?",
-        lowered,
-    )
-    if m:
-        raw = m.group(0)
-        num_part = re.search(r"[\d][\d\s.,]*", raw)
-        if num_part:
-            cleaned = re.sub(r"[\s]", "", num_part.group())
-            # Detect thousands separator: if dots/commas separate groups of 3
-            # e.g. 127.000.000 → all dots are thousands separators
-            if re.match(r"^\d{1,3}([.,]\d{3})+$", cleaned):
-                cleaned = re.sub(r"[.,]", "", cleaned)
-            else:
-                cleaned = cleaned.replace(",", "").replace(".", "")
-            try:
-                amount = float(cleaned)
-            except ValueError:
-                pass
+    def parse_number(raw: str) -> float | None:
+        raw = raw.strip()
+        if not raw:
+            return None
 
-        # Apply multiplier
-        if amount is not None:
-            if re.search(r"млрд|миллиард|milliard", raw):
-                amount *= 1_000_000_000
-            elif re.search(r"млн|миллион|million|mln", raw):
-                if amount < 10_000:  # guard: 100 mln but not 100_000_000 mln
-                    amount *= 1_000_000
+        compact = re.sub(r"\s+", "", raw)
 
-    # Fallback: largest bare number in text
-    if amount is None:
-        nums = re.findall(r"\b(\d[\d\s.,]{4,})\b", lowered)
-        for raw in nums:
-            cleaned = re.sub(r"[\s.,]", "", raw)
-            try:
-                v = float(cleaned)
-                if v > (amount or 0):
-                    amount = v
-            except ValueError:
-                pass
+        # 127.000.000 or 127,000,000 -> thousands separators
+        if re.match(r"^\d{1,3}([.,]\d{3})+$", compact):
+            compact = re.sub(r"[.,]", "", compact)
+        # 1.5 or 1,5 -> decimal
+        elif re.match(r"^\d+[.,]\d+$", compact):
+            compact = compact.replace(",", ".")
+        else:
+            compact = compact.replace(",", "").replace(".", "")
+
+        try:
+            return float(compact)
+        except ValueError:
+            return None
 
     # ---- Term in months ----
     months: int | None = None
@@ -1039,8 +1028,62 @@ def parse_loan_params(text: str) -> dict | None:
         except ValueError:
             pass
 
+    # ---- Amount ----
+    amount: float | None = None
+    amount_candidates: list[float] = []
+
+    # Prefer numbers explicitly near currency or amount words.
+    currency_patterns = [
+        # "сумма 234000000", "размер 135.000.000"
+        rf"(?:сумма|размер|кредит(?:а)?|kredit\s*summasi|summa|қарз|кредит\s*суммаси)\s*[:\-]?\s*({number_re})(?:\s*(млн\.?|миллион|миллиард|млрд\.?|mln\.?|million|milliard))?",
+        # "234000000 сум", "100 млн сум"
+        rf"({number_re})(?:\s*(млн\.?|миллион|миллиард|млрд\.?|mln\.?|million|milliard))?\s*(?:сум|sum|uzs|so'm|сўм)",
+    ]
+
+    for pattern in currency_patterns:
+        for match in re.finditer(pattern, lowered, flags=re.IGNORECASE):
+            raw_num = match.group(1)
+            multiplier_word = ""
+            if match.lastindex and match.lastindex >= 2:
+                multiplier_word = match.group(2) or ""
+
+            value = parse_number(raw_num)
+            if value is None:
+                continue
+
+            if re.search(r"млрд|миллиард|milliard", multiplier_word, re.IGNORECASE):
+                value *= 1_000_000_000
+            elif re.search(r"млн|миллион|million|mln", multiplier_word, re.IGNORECASE):
+                value *= 1_000_000
+
+            amount_candidates.append(value)
+
+    # Fallback: collect all numbers, exclude month/rate-sized values, take the largest.
+    if not amount_candidates:
+        fallback_pattern = rf"({number_re})(?:\s*(млн\.?|миллион|миллиард|млрд\.?|mln\.?|million|milliard))?"
+        for match in re.finditer(fallback_pattern, lowered, flags=re.IGNORECASE):
+            raw_num = match.group(1)
+            multiplier_word = match.group(2) or ""
+
+            value = parse_number(raw_num)
+            if value is None:
+                continue
+
+            if re.search(r"млрд|миллиард|milliard", multiplier_word, re.IGNORECASE):
+                value *= 1_000_000_000
+            elif re.search(r"млн|миллион|million|mln", multiplier_word, re.IGNORECASE):
+                value *= 1_000_000
+
+            # Filter out likely month/rate values such as 12, 21, 36, 60.
+            if value >= 1_000:
+                amount_candidates.append(value)
+
+    if amount_candidates:
+        amount = max(amount_candidates)
+
     if amount and months and rate:
         return {"amount": amount, "months": months, "rate": rate}
+
     return None
 
 
