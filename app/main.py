@@ -1770,9 +1770,322 @@ async def analytics_export_messages_csv(
 
 
 @app.get("/analytics/dashboard", response_class=HTMLResponse)
-async def analytics_dashboard():
-    # Dashboard HTML unchanged — omitted for brevity, paste original here
-    return "<html><body><h1>Analytics Dashboard</h1><p>Paste original HTML here.</p></body></html>"
+async def analytics_dashboard():return """FINKO Bot Analytics* { box-sizing: border-box; }body {margin: 0;font-family: Arial, sans-serif;background: #0f172a;color: #e2e8f0;}.wrap {max-width: 1400px;margin: 0 auto;padding: 24px;}h1 {margin: 0 0 20px;font-size: 28px;}.topbar {display: flex;gap: 12px;flex-wrap: wrap;margin-bottom: 24px;}input {flex: 1;min-width: 280px;padding: 12px 14px;border-radius: 10px;border: 1px solid #334155;background: #111827;color: white;outline: none;}button, a.btn {padding: 12px 18px;border: none;border-radius: 10px;background: #2563eb;color: white;cursor: pointer;font-weight: 600;text-decoration: none;display: inline-flex;align-items: center;justify-content: center;}button, a.btn {background: #1d4ed8;}.grid {display: grid;grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));gap: 16px;margin-bottom: 24px;}.card {background: #111827;border: 1px solid #1f2937;border-radius: 16px;padding: 18px;box-shadow: 0 6px 20px rgba(0,0,0,0.25);}.card h3 {margin: 0 0 8px;font-size: 14px;color: #94a3b8;font-weight: 600;}.value {font-size: 28px;font-weight: 700;color: #f8fafc;}.section {margin-top: 22px;}.section h2 {font-size: 20px;margin: 0 0 12px;}table {width: 100%;border-collapse: collapse;background: #111827;border-radius: 16px;overflow: hidden;border: 1px solid #1f2937;}th, td {padding: 12px 14px;border-bottom: 1px solid #1f2937;text-align: left;vertical-align: top;font-size: 14px;}th {background: #0b1220;color: #93c5fd;}tr td {border-bottom: none;}.muted {color: #94a3b8;font-size: 14px;margin-top: 8px;}.error {margin-top: 16px;padding: 12px 14px;border-radius: 10px;background: #7f1d1d;color: #fecaca;display: none;}.ok {margin-top: 16px;padding: 12px 14px;border-radius: 10px;background: #052e16;color: #bbf7d0;display: none;}.badge {display: inline-block;padding: 4px 8px;border-radius: 999px;background: #1e293b;color: #cbd5e1;font-size: 12px;}.small {font-size: 13px;color: #94a3b8;}.message-cell {max-width: 520px;white-space: pre-wrap;word-break: break-word;}FINKO Bot Analytics Dashboard
+
+        <div class="topbar">
+            <input
+                id="tokenInput"
+                type="password"
+                placeholder="Вставь ADMIN_ANALYTICS_TOKEN"
+            />
+            <button onclick="loadAnalytics()">Загрузить аналитику</button>
+            <a href="#" class="btn" onclick="downloadCsv(event)">Скачать CSV</a>
+        </div>
+
+        <div class="muted">
+            Доступно:
+            <span class="badge">summary</span>
+            <span class="badge">top questions</span>
+            <span class="badge">top users</span>
+            <span class="badge">recent messages</span>
+            <span class="badge">csv export</span>
+        </div>
+
+        <div id="okBox" class="ok"></div>
+        <div id="errorBox" class="error"></div>
+
+        <div class="grid section">
+            <div class="card">
+                <h3>Пользователи</h3>
+                <div class="value" id="usersCount">-</div>
+            </div>
+            <div class="card">
+                <h3>Всего сообщений</h3>
+                <div class="value" id="messagesCount">-</div>
+            </div>
+            <div class="card">
+                <h3>Входящие</h3>
+                <div class="value" id="inboundCount">-</div>
+            </div>
+            <div class="card">
+                <h3>Исходящие</h3>
+                <div class="value" id="outboundCount">-</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Топ intent-ов</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Intent</th>
+                        <th>Количество</th>
+                    </tr>
+                </thead>
+                <tbody id="intentsTable"></tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Языки пользователей</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Язык</th>
+                        <th>Количество</th>
+                    </tr>
+                </thead>
+                <tbody id="languagesTable"></tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Типы пользователей</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Тип</th>
+                        <th>Количество</th>
+                    </tr>
+                </thead>
+                <tbody id="userTypesTable"></tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Топ вопросов</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Вопрос</th>
+                        <th>Количество</th>
+                    </tr>
+                </thead>
+                <tbody id="questionsTable"></tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Топ пользователей</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Chat ID</th>
+                        <th>Username</th>
+                        <th>Имя</th>
+                        <th>Сообщений</th>
+                        <th>Тип</th>
+                        <th>Last language</th>
+                        <th>UI language</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTable"></tbody>
+            </table>
+        </div>
+
+        <div class="section">
+            <h2>Кто что написал</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Дата и время</th>
+                        <th>Chat ID</th>
+                        <th>Username</th>
+                        <th>Имя</th>
+                        <th>Direction</th>
+                        <th>Язык</th>
+                        <th>Intent</th>
+                        <th>Источник</th>
+                        <th>Сообщение</th>
+                    </tr>
+                </thead>
+                <tbody id="recentMessagesTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        function showError(message) {
+            const box = document.getElementById("errorBox");
+            box.style.display = "block";
+            box.textContent = message;
+            document.getElementById("okBox").style.display = "none";
+        }
+
+        function showOk(message) {
+            const box = document.getElementById("okBox");
+            box.style.display = "block";
+            box.textContent = message;
+            document.getElementById("errorBox").style.display = "none";
+        }
+
+        function clearTables() {
+            document.getElementById("intentsTable").innerHTML = "";
+            document.getElementById("languagesTable").innerHTML = "";
+            document.getElementById("userTypesTable").innerHTML = "";
+            document.getElementById("questionsTable").innerHTML = "";
+            document.getElementById("usersTable").innerHTML = "";
+            document.getElementById("recentMessagesTable").innerHTML = "";
+        }
+
+        function renderKeyValueRows(targetId, items) {
+            const tbody = document.getElementById(targetId);
+            tbody.innerHTML = "";
+
+            if (!items || items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="2" class="small">Нет данных</td></tr>';
+                return;
+            }
+
+            items.forEach(item => {
+                const key = Object.keys(item)[0];
+                const value = item[key];
+                const row = document.createElement("tr");
+                row.innerHTML = `<td>${key}</td><td>${value}</td>`;
+                tbody.appendChild(row);
+            });
+        }
+
+        function renderQuestions(items) {
+            const tbody = document.getElementById("questionsTable");
+            tbody.innerHTML = "";
+
+            if (!items || items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="2" class="small">Нет данных</td></tr>';
+                return;
+            }
+
+            items.forEach(item => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${item.question}</td>
+                    <td>${item.count}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function renderUsers(items) {
+            const tbody = document.getElementById("usersTable");
+            tbody.innerHTML = "";
+
+            if (!items || items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" class="small">Нет данных</td></tr>';
+                return;
+            }
+
+            items.forEach(item => {
+                const fullName = ((item.first_name || "") + " " + (item.last_name || "")).trim();
+
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${item.chat_id ?? ""}</td>
+                    <td>${item.username ?? ""}</td>
+                    <td>${fullName}</td>
+                    <td>${item.messages_count ?? 0}</td>
+                    <td>${item.user_type ?? ""}</td>
+                    <td>${item.last_language ?? ""}</td>
+                    <td>${item.selected_language ?? ""}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        function renderRecentMessages(items) {
+            const tbody = document.getElementById("recentMessagesTable");
+            tbody.innerHTML = "";
+
+            if (!items || items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" class="small">Нет данных</td></tr>';
+                return;
+            }
+
+            items.forEach(item => {
+                const fullName = ((item.first_name || "") + " " + (item.last_name || "")).trim();
+
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                    <td>${item.created_at ?? ""}</td>
+                    <td>${item.chat_id ?? ""}</td>
+                    <td>${item.username ?? ""}</td>
+                    <td>${fullName}</td>
+                    <td>${item.direction ?? ""}</td>
+                    <td>${item.language ?? ""}</td>
+                    <td>${item.intent ?? ""}</td>
+                    <td>${item.source ?? ""}</td>
+                    <td class="message-cell">${item.text ?? ""}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        async function fetchJson(url, token) {
+            const response = await fetch(url, {
+                headers: {
+                    "x-admin-token": token
+                }
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                throw new Error(`HTTP ${response.status}: ${text}`);
+            }
+
+            return await response.json();
+        }
+
+        async function loadAnalytics() {
+            const token = document.getElementById("tokenInput").value.trim();
+
+            if (!token) {
+                showError("Сначала вставь ADMIN_ANALYTICS_TOKEN.");
+                return;
+            }
+
+            clearTables();
+
+            try {
+                const [summary, questions, users, recentMessages] = await Promise.all([
+                    fetchJson("/analytics/summary", token),
+                    fetchJson("/analytics/top-questions?limit=15", token),
+                    fetchJson("/analytics/top-users?limit=15", token),
+                    fetchJson("/analytics/recent-messages?limit=100", token),
+                ]);
+
+                document.getElementById("usersCount").textContent = summary.users_count ?? 0;
+                document.getElementById("messagesCount").textContent = summary.messages_count ?? 0;
+                document.getElementById("inboundCount").textContent = summary.inbound_count ?? 0;
+                document.getElementById("outboundCount").textContent = summary.outbound_count ?? 0;
+
+                renderKeyValueRows("intentsTable", summary.top_intents || []);
+                renderKeyValueRows("languagesTable", summary.languages || []);
+                renderKeyValueRows("userTypesTable", summary.user_types || []);
+                renderQuestions(questions.top_questions || []);
+                renderUsers(users.top_users || []);
+                renderRecentMessages(recentMessages.recent_messages || []);
+
+                showOk("Аналитика успешно загружена.");
+            } catch (error) {
+                showError("Не удалось загрузить аналитику: " + error.message);
+            }
+        }
+
+        function downloadCsv(event) {
+            event.preventDefault();
+
+            const token = document.getElementById("tokenInput").value.trim();
+
+            if (!token) {
+                showError("Сначала вставь ADMIN_ANALYTICS_TOKEN.");
+                return;
+            }
+
+            window.location.href = `/analytics/export/messages.csv?x_admin_token=${encodeURIComponent(token)}`;
+        }
+    </script>
+</body>
+</html>
+"""
 
 # ============================================================
 # Webhook
