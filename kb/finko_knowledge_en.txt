@@ -730,3 +730,38 @@ Available through FINKO:
 All products are certified by a Sharia board.
 
 Learn more: https://finko.uz/uz/islamic-finance
+
+32. LOAN CALCULATION AND PAYMENT SCHEDULE
+
+Can the bot calculate loan payments?
+
+Yes. If the user provides amount, term, and interest rate,
+the bot can calculate an approximate payment schedule:
+annuity or differentiated.
+
+IMPORTANT: this is a mathematical calculation based on user input.
+Actual terms are determined by banks or MFIs.
+
+What is an annuity payment?
+
+Annuity — fixed monthly payment throughout the loan term.
+
+Formula:
+P = S × i × (1 + i)^n / ((1 + i)^n − 1)
+
+What is a differentiated payment?
+
+Principal is paid equally, interest decreases over time.
+
+Formula:
+Principal = S / n
+Interest = remaining balance × i
+Payment = principal + interest
+
+Which one to choose?
+
+Annuity — predictable payments.
+Differentiated — lower total overpayment, but higher initial payments.
+
+Apply here:
+https://finko.uz/ru
