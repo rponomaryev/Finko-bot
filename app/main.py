@@ -41,6 +41,8 @@ KB_SEARCH_RESULTS = int(os.getenv("KB_SEARCH_RESULTS", "20"))
 KB_MAX_CHUNKS = int(os.getenv("KB_MAX_CHUNKS", "8"))
 CHAT_MEMORY_TURNS = int(os.getenv("CHAT_MEMORY_TURNS", "8"))
 TELEGRAM_TIMEOUT_SECONDS = float(os.getenv("TELEGRAM_TIMEOUT_SECONDS", "30"))
+MINI_APP_URL = os.getenv("MINI_APP_URL", "").strip()
+MINI_APP_BUTTON_TEXT = os.getenv("MINI_APP_BUTTON_TEXT", "Подобрать кредит").strip()
 
 DATABASE_PATH = os.getenv("DATABASE_PATH", str(BASE_DIR / "bot_analytics.db"))
 ADMIN_ANALYTICS_TOKEN = os.getenv("ADMIN_ANALYTICS_TOKEN", "")
@@ -159,6 +161,8 @@ def init_db() -> None:
 async def startup_event():
     init_db()
     logger.info("Database initialized at %s", DATABASE_PATH)
+
+    await set_telegram_menu_button()
 
 
 def upsert_user_profile(
@@ -694,6 +698,28 @@ def strip_cross_language_artifacts(answer: str, lang: str) -> str:
 
     return cleaned
 
+async def set_telegram_menu_button() -> None:
+    if not MINI_APP_URL:
+        logger.warning("MINI_APP_URL is not set, Telegram menu button skipped")
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setChatMenuButton"
+
+    payload = {
+        "menu_button": {
+            "type": "web_app",
+            "text": MINI_APP_BUTTON_TEXT,
+            "web_app": {
+                "url": MINI_APP_URL,
+            },
+        }
+    }
+
+    async with httpx.AsyncClient(timeout=TELEGRAM_TIMEOUT_SECONDS) as http_client:
+        response = await http_client.post(url, json=payload)
+        response.raise_for_status()
+
+    logger.info("Telegram menu button configured: %s -> %s", MINI_APP_BUTTON_TEXT, MINI_APP_URL)
 
 async def send_telegram_message(
     chat_id: int,
