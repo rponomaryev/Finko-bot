@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 import io
 import csv
+import json
 
 import httpx
 from dotenv import load_dotenv
@@ -552,6 +553,32 @@ def validate_webhook_body_size(request: Request) -> None:
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="Webhook body is too large",
         )
+
+
+async def read_limited_json_body(request: Request) -> dict[str, Any]:
+    body = await request.body()
+
+    if MAX_WEBHOOK_BODY_BYTES > 0 and len(body) > MAX_WEBHOOK_BODY_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Webhook body is too large",
+        )
+
+    try:
+        parsed = json.loads(body.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON body",
+        )
+
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid Telegram update body",
+        )
+
+    return parsed
 
 # ============================================================
 # Intents / user types
@@ -2499,7 +2526,7 @@ async def telegram_webhook(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Telegram secret token")
 
     validate_webhook_body_size(request)
-    update = await request.json()
+    update = await read_limited_json_body(request)
     logger.info("Incoming update received")
 
     update_id = update.get("update_id")
