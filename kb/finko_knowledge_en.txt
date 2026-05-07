@@ -56,7 +56,7 @@ No. FINKO is not a bank and does not issue loans directly. FINKO is an IT platfo
 
 When was FINKO launched?
 
-FINKO was launched in October 2025.
+FINKO started operations on May 1, 2026.
 
 Legal status
 
@@ -75,8 +75,11 @@ FINKO works with:
 
 Hamkorbank
 Universal Bank
-Davr-Bank
+DavrBank
 Madad Invest Bank
+Garant Bank
+Tenge Bank
+Asia Alliance Bank
 
 Partner MFOs
 
@@ -131,7 +134,7 @@ What exactly are you interested in: a business loan, leasing, or connecting your
 
 Answer:
 
-FINKO works with partner banks Hamkorbank, Universal Bank, Davr-Bank, Madad Invest Bank, as well as MFOs DELTA, PULMAN, APEX MOLIYA, ANSOR, and ALMIZAN.
+FINKO works with partner banks Hamkorbank, Universal Bank, DavrBank, Madad Invest Bank, Garant Bank, Tenge Bank, Asia Alliance Bank, as well as MFOs DELTA, PULMAN, APEX MOLIYA, ANSOR, and ALMIZAN. The number of partner organizations is continuously growing.
 Would you like to learn about partner products or submit an application?
 
 “Contacts”
