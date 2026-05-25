@@ -41,6 +41,14 @@ def detect_intent(user_text: str) -> str:
     }:
         return "restart"
 
+    if (
+        "e-imzo" in text or "e imzo" in text or "eimzo" in text
+        or "электронная подпись" in text or "эцп" in text
+        or ("imzo" in text and ("kalit" in text or "sertifikat" in text or "nima" in text))
+        or ("digital signature" in text or "electronic signature" in text)
+    ):
+        return "e_imzo"
+
     if text in {
         "kontakti", "kontaktlar", "contacts", "contact",
         "контакты", "контакт", "контактлар", "алоқа", "/contacts"

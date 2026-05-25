@@ -78,8 +78,6 @@ Universal Bank
 DavrBank
 Madad Invest Bank
 Garant Bank
-Tenge Bank
-Asia Alliance Bank
 
 MFOlar:
 
@@ -88,6 +86,9 @@ PULMAN
 APEX MOLIYA
 ANSOR
 ALMIZAN
+Aloqa Miqromoliya Tashkiloti
+Una Moliya
+VAFO MOLIYA
 
 Hamkorlar ro‘yxati kengayishi mumkin. Aktual katalog FINKO saytida mavjud.
 
@@ -128,7 +129,7 @@ Sizni aynan nima qiziqtiradi?
 
 “Hamkorlar”
 
-FINKO Hamkorbank, Universal Bank, DavrBank, Madad Invest Bank, Garant Bank, Tenge Bank, Asia Alliance Bank hamda DELTA, PULMAN, APEX MOLIYA, ANSOR va ALMIZAN bilan ishlaydi. Hamkor tashkilotlar soni doimiy ravishda oshib bormoqda.
+FINKO Hamkorbank, Universal Bank, DavrBank, Madad Invest Bank va Garant Bank bilan hamkorlik qiladi. MFO/MMT hamkorlari: DELTA, PULMAN, APEX MOLIYA, ANSOR, ALMIZAN, Aloqa Miqromoliya Tashkiloti, Una Moliya va VAFO MOLIYA. Hamkor tashkilotlar soni doimiy ravishda oshib bormoqda.
 
 Takliflarni ko‘rmoqchimisiz yoki ariza topshirmoqchimisiz?
 
@@ -374,7 +375,7 @@ Javob:
 
 Qaysi til sizga qulay?
 
-Русский / O‘zbekcha (lotin) / Ўзбекча (кирилл) / English
+Русский / O'zbekcha (lotin) / English
 
 Keyin:
 
@@ -479,3 +480,21 @@ FINKO orqali mavjud:
 Barcha mahsulotlar Shariat kengashi tomonidan tasdiqlangan.
 
 Batafsil: https://finko.uz/uz/islamic-finance
+
+30. E-IMZO VA ELEKTRON IMZO
+
+E-IMZO nima?
+
+E-IMZO — O'zbekistonda elektron raqamli imzo uchun ishlatiladigan kalit/sertifikat. U shaxsni tasdiqlash va hujjatlarni onlayn imzolash uchun kerak bo'ladi.
+
+E-IMZO kaliti nima?
+
+E-IMZO kaliti — egasi bilan bog'langan shaxsiy elektron kalit yoki sertifikat. U hujjatni aynan shu shaxs yoki tashkilot imzolayotganini tasdiqlashga yordam beradi.
+
+FINKO'da E-IMZO nima uchun kerak?
+
+FINKO'da E-IMZO hamkor tashkilot bilan hujjatlarni imzolash bosqichida kerak bo'lishi mumkin. FINKO ariza topshirishga yordam beradi, lekin yakuniy hujjatlar va shartlar bank, MFO/MMT yoki boshqa hamkor tomonidan belgilanadi.
+
+Xavfsizlik bo'yicha muhim eslatma
+
+E-IMZO kaliti, parol, SMS-kodlar va kirish ma'lumotlarini uchinchi shaxslarga bermang. Agar texnik muammo yoki shubha bo'lsa, FINKO support xizmatiga murojaat qiling: +998 50 177 77 88 yoki info@finko.uz.

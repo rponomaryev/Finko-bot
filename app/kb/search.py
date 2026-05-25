@@ -13,11 +13,10 @@ from app.config import (
 from app.services.openai_client import client
 from app.utils.retry import retry_delay
 
+
 def file_lang_from_filename(filename: str) -> str | None:
     name = filename.lower()
 
-    if "_uz_cyrl" in name or "uz_cyrl" in name:
-        return "uz_cyrl"
     if "_uz" in name or name.endswith("uz.txt"):
         return "uz_latn"
     if "_ru" in name or name.endswith("ru.txt"):
@@ -33,42 +32,54 @@ def normalize_text_for_dedup(text: str) -> str:
 
 
 def preferred_search_languages(input_lang: str) -> list[str]:
-    if input_lang == "uz_cyrl":
-        return ["uz_cyrl", "uz_latn", "ru", "en"]
-    if input_lang == "uz_latn":
-        return ["uz_latn", "uz_cyrl", "ru", "en"]
+    if input_lang == "uz_latn" or input_lang == "uz_cyrl":
+        return ["uz_latn", "ru", "en"]
     if input_lang == "ru":
-        return ["ru", "uz_cyrl", "uz_latn", "en"]
-    return ["en", "ru", "uz_latn", "uz_cyrl"]
+        return ["ru", "uz_latn", "en"]
+    return ["en", "ru", "uz_latn"]
 
 
 def build_search_queries(user_text: str, detected_lang: str, intent: str) -> list[str]:
     queries = [user_text.strip()]
 
-    if intent in {"partners", "partners_menu"}:
+    if intent in {"e_imzo"}:
         if detected_lang == "ru":
             queries.extend([
-                "банки партнеры FINKO",
-                "Hamkorbank Universal Bank DavrBank Madad Invest Bank Garant Bank Tenge Bank Asia Alliance Bank",
-                "МФО партнеры FINKO DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN",
+                "что такое E-IMZO ключ электронная цифровая подпись",
+                "E-IMZO ЭЦП подписание документов FINKO",
             ])
-        elif detected_lang in {"uz_latn", "uz_cyrl"}:
+        elif detected_lang == "uz_latn":
             queries.extend([
-                "FINKO hamkor banklar",
-                "Hamkorbank Universal Bank DavrBank Madad Invest Bank Garant Bank Tenge Bank Asia Alliance Bank",
-                "FINKO hamkor MMTlar DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN",
+                "E-IMZO kaliti nima elektron raqamli imzo",
+                "E-IMZO hujjatlarni imzolash FINKO",
             ])
         else:
             queries.extend([
-                "FINKO partner banks",
-                "Hamkorbank Universal Bank DavrBank Madad Invest Bank Garant Bank Tenge Bank Asia Alliance Bank",
-                "FINKO partner MFOs DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN",
+                "what is E-IMZO digital signature key",
+                "E-IMZO signing documents FINKO",
+            ])
+
+    elif intent in {"partners", "partners_menu"}:
+        if detected_lang == "ru":
+            queries.extend([
+                "банки партнеры FINKO Hamkorbank Universal Bank DavrBank Madad Invest Bank Garant Bank",
+                "МФО партнеры FINKO DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN Aloqa Miqromoliya Tashkiloti Una Moliya VAFO MOLIYA",
+            ])
+        elif detected_lang == "uz_latn":
+            queries.extend([
+                "FINKO hamkor banklar Hamkorbank Universal Bank DavrBank Madad Invest Bank Garant Bank",
+                "FINKO hamkor MMTlar DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN Aloqa Miqromoliya Tashkiloti Una Moliya VAFO MOLIYA",
+            ])
+        else:
+            queries.extend([
+                "FINKO partner banks Hamkorbank Universal Bank DavrBank Madad Invest Bank Garant Bank",
+                "FINKO partner MFOs DELTA PULMAN APEX MOLIYA ANSOR ALMIZAN Aloqa Miqromoliya Tashkiloti Una Moliya VAFO MOLIYA",
             ])
 
     elif intent in {"business", "business_menu"}:
         if detected_lang == "ru":
             queries.extend(["бизнес кредиты FINKO", "лизинг страхование бизнес FINKO"])
-        elif detected_lang in {"uz_latn", "uz_cyrl"}:
+        elif detected_lang == "uz_latn":
             queries.extend(["FINKO biznes kreditlari", "lizing sug'urta biznes FINKO"])
         else:
             queries.extend(["FINKO business loans", "FINKO leasing insurance business"])
@@ -80,7 +91,7 @@ def build_search_queries(user_text: str, detected_lang: str, intent: str) -> lis
                 "как подать заявку на кредит FINKO",
                 "ипотека автокредит микрозаймы FINKO",
             ])
-        elif detected_lang in {"uz_latn", "uz_cyrl"}:
+        elif detected_lang == "uz_latn":
             queries.extend([
                 "FINKO kreditlar",
                 "kredit uchun ariza topshirish FINKO",
@@ -181,6 +192,7 @@ async def search_once(query: str, preferred_lang: str) -> list[str]:
             return selected
 
     return selected
+
 
 async def search_knowledge_base(user_text: str, preferred_lang: str, intent: str) -> str | None:
     queries = build_search_queries(user_text, preferred_lang, intent)

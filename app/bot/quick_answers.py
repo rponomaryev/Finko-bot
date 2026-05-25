@@ -1,20 +1,66 @@
 from app.bot.intents import detect_intent, normalize_text_for_match
-from app.bot.language import platform_link
+from app.bot.language import normalize_supported_lang, platform_link
 from app.bot import state
 
+
+def _partner_text(lang: str) -> str:
+    if lang == "uz_latn":
+        return (
+            "FINKO Hamkorbank, Universal Bank, DavrBank, Madad Invest Bank va Garant Bank bilan hamkorlik qiladi. "
+            "MFO/MMT hamkorlari: DELTA, PULMAN, APEX MOLIYA, ANSOR, ALMIZAN, "
+            "Aloqa Miqromoliya Tashkiloti, Una Moliya va VAFO MOLIYA. "
+            "Hamkor tashkilotlar soni doimiy ravishda oshib bormoqda."
+        )
+    if lang == "en":
+        return (
+            "FINKO works with Hamkorbank, Universal Bank, DavrBank, Madad Invest Bank, and Garant Bank. "
+            "Partner MFOs are DELTA, PULMAN, APEX MOLIYA, ANSOR, ALMIZAN, "
+            "Aloqa Miqromoliya Tashkiloti, Una Moliya, and VAFO MOLIYA. "
+            "The number of partner organizations is continuously growing."
+        )
+    return (
+        "FINKO сотрудничает с Hamkorbank, Universal Bank, DavrBank, Madad Invest Bank и Garant Bank. "
+        "МФО-партнёры: DELTA, PULMAN, APEX MOLIYA, ANSOR, ALMIZAN, "
+        "Aloqa Miqromoliya Tashkiloti, Una Moliya и VAFO MOLIYA. "
+        "Количество партнёрских организаций постоянно увеличивается."
+    )
+
+
+def _e_imzo_text(lang: str) -> str:
+    if lang == "uz_latn":
+        return (
+            "E-IMZO kaliti — bu O'zbekistonda elektron raqamli imzo uchun ishlatiladigan shaxsiy kalit/sertifikat. "
+            "U shaxsni tasdiqlash va hujjatlarni onlayn imzolash uchun kerak bo'ladi. "
+            "FINKO'da E-IMZO hamkor tashkilot bilan hujjatlarni imzolash bosqichida talab qilinishi mumkin. "
+            "Kalit va parolni uchinchi shaxslarga bermang."
+        )
+    if lang == "en":
+        return (
+            "E-IMZO is an electronic digital signature key/certificate used in Uzbekistan. "
+            "It confirms a person's identity and allows documents to be signed online. "
+            "In FINKO, E-IMZO may be required when signing documents with a partner organization. "
+            "Do not share your key or password with anyone."
+        )
+    return (
+        "E-IMZO — это ключ/сертификат электронной цифровой подписи в Узбекистане. "
+        "Он подтверждает личность и позволяет подписывать документы онлайн. "
+        "В FINKO E-IMZO может понадобиться на этапе подписания документов с партнёрской организацией. "
+        "Не передавайте ключ и пароль третьим лицам."
+    )
+
+
 def build_quick_answer(action: str, lang: str) -> str:
+    lang = normalize_supported_lang(lang)
     link = platform_link(lang)
     answers = {
         "restart": {
             "ru": "Бот перезапущен. Можете отправить новый вопрос.",
             "uz_latn": "Bot qayta ishga tushdi. Yangi savol yuborishingiz mumkin.",
-            "uz_cyrl": "Бот қайта ишга тушди. Янги савол юборишингиз мумкин.",
             "en": "The bot has been restarted. You can send a new question.",
         },
         "insert_question": {
             "ru": "Напишите ваш вопрос одним сообщением. Я определю язык вопроса и отвечу на этом языке.",
             "uz_latn": "Savolingizni bitta xabarda yozing. Men savol tilini aniqlab, shu tilda javob beraman.",
-            "uz_cyrl": "Саволингизни битта хабарда ёзинг. Мен савол тилини аниқлаб, шу тилда жавоб бераман.",
             "en": "Please write your question in one message. I will detect the language and reply in that language.",
         },
         "contacts": {
@@ -35,15 +81,6 @@ def build_quick_answer(action: str, lang: str) -> str:
                 "Ofis: Toshkent, Oybek 18/1, ATRIUM\n"
                 "Telegram: https://t.me/finkouz\n"
                 "Ish vaqti: dushanbadan jumagacha, soat 9:00 dan 18:00 gacha"
-            ),
-            "uz_cyrl": (
-                "FINKO контактлари:\n"
-                "Телефон: +998 50 177 77 88\n"
-                "Email: info@finko.uz\n"
-                "Сайт: https://finko.uz\n"
-                "Офис: Тошкент, Ойбек 18/1, ATRIUM\n"
-                "Telegram: https://t.me/finkouz\n"
-                "Иш вақти: душанбадан жумагача, соат 9:00 дан 18:00 гача"
             ),
             "en": (
                 "FINKO contacts:\n"
@@ -68,12 +105,6 @@ def build_quick_answer(action: str, lang: str) -> str:
                 f"yoki MMT tomonidan belgilanadi. FINKO kreditni to'g'ridan-to'g'ri bermaydi.\n\n"
                 f"Ariza topshirish: {link}"
             ),
-            "uz_cyrl": (
-                f"FINKO орқали истеъмол кредитлари, автокредитлар, ипотека, микрозаймлар "
-                f"ва бошқа молиявий маҳсулотлар мавжуд. Сумма, муддат ва ставка ҳамкор банк "
-                f"ёки ММТ томонидан белгиланади. FINKO кредитни тўғридан-тўғри бермайди.\n\n"
-                f"Ариза топшириш: {link}"
-            ),
             "en": (
                 f"Through FINKO, users can access consumer loans, auto loans, mortgages, "
                 f"microloans, and other financial products. The amount, term, and rate are "
@@ -94,12 +125,6 @@ def build_quick_answer(action: str, lang: str) -> str:
                 f"Yakuniy shartlar hamkor tashkilot tomonidan belgilanadi.\n\n"
                 f"Ariza topshirish: {link}"
             ),
-            "uz_cyrl": (
-                f"Бизнес учун FINKO орқали бизнес кредитлари, айланма ва инвестиция "
-                f"кредитлари, лизинг, депозитлар, суғурта ва бошқа ечимлар мавжуд. "
-                f"Якуний шартлар ҳамкор ташкилот томонидан белгиланади.\n\n"
-                f"Ариза топшириш: {link}"
-            ),
             "en": (
                 f"For businesses, FINKO offers access to business loans, working capital and "
                 f"investment loans, leasing, deposits, insurance, and related solutions. "
@@ -108,41 +133,23 @@ def build_quick_answer(action: str, lang: str) -> str:
             ),
         },
         "partners_menu": {
-            "ru": (
-                "FINKO сотрудничает с Hamkorbank, Universal Bank, DavrBank, Madad Invest Bank, "
-                "Garant Bank, Tenge Bank, Asia Alliance Bank, а также с МФО DELTA, PULMAN, "
-                "APEX MOLIYA, ANSOR и ALMIZAN. Количество партнёрских "
-                "организаций постоянно увеличивается."
-            ),
-            "uz_latn": (
-                "FINKO Hamkorbank, Universal Bank, DavrBank, Madad Invest Bank, Garant Bank, "
-                "Tenge Bank, Asia Alliance Bank bilan, shuningdek DELTA, PULMAN, "
-                "APEX MOLIYA, ANSOR va ALMIZAN kabi MMTlar bilan "
-                "hamkorlik qiladi. Hamkor tashkilotlar soni doimiy ravishda oshib bormoqda."
-            ),
-            "uz_cyrl": (
-                "FINKO Hamkorbank, Universal Bank, DavrBank, Madad Invest Bank, Garant Bank, "
-                "Tenge Bank, Asia Alliance Bank билан, шунингдек DELTA, PULMAN, "
-                "APEX MOLIYA, ANSOR ва ALMIZAN каби ММТлар билан "
-                "ҳамкорлик қилади. Ҳамкор ташкилотлар сони доимий равишда ошиб бормоқда."
-            ),
-            "en": (
-                "FINKO works with Hamkorbank, Universal Bank, DavrBank, Madad Invest Bank, "
-                "Garant Bank, Tenge Bank, Asia Alliance Bank, as well as the MFOs DELTA, "
-                "PULMAN, APEX MOLIYA, ANSOR, and ALMIZAN. The number "
-                "of partner organizations is continuously growing."
-            ),
+            "ru": _partner_text("ru"),
+            "uz_latn": _partner_text("uz_latn"),
+            "en": _partner_text("en"),
+        },
+        "e_imzo": {
+            "ru": _e_imzo_text("ru"),
+            "uz_latn": _e_imzo_text("uz_latn"),
+            "en": _e_imzo_text("en"),
         },
         "greeting": {
             "ru": "Здравствуйте! Я AI-ассистент FINKO. Могу помочь с продуктами, бизнес-вопросами, партнёрством и контактами.",
             "uz_latn": "Salom! Men FINKO AI yordamchisiman. Mahsulotlar, biznes savollari, hamkorlik va kontaktlar bo'yicha yordam bera olaman.",
-            "uz_cyrl": "Салом! Мен FINKO AI ёрдамчисиман. Маҳсулотлар, бизнес саволлари, ҳамкорлик ва контактлар бўйича ёрдам бера оламан.",
             "en": "Hello! I'm the FINKO AI assistant. I can help with products, business questions, partnerships, and contacts.",
         },
         "thanks": {
             "ru": "Пожалуйста! Если захотите, можете задать ещё один вопрос.",
             "uz_latn": "Marhamat! Xohlasangiz, yana savol yuborishingiz mumkin.",
-            "uz_cyrl": "Марҳамат! Хоҳласангиз, яна савол юборишингиз мумкин.",
             "en": "You're welcome! Feel free to send another question.",
         },
     }
@@ -158,7 +165,7 @@ def should_use_quick_reply(intent: str, user_text: str) -> bool:
 
     if intent in {
         "restart", "insert_question", "contacts", "credits_menu", "business_menu",
-        "partners_menu", "greeting", "thanks"
+        "partners_menu", "e_imzo", "greeting", "thanks"
     }:
         return True
 

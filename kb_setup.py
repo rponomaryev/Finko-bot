@@ -20,7 +20,6 @@ FILES_TO_UPLOAD = [
     "finko_knowledge_ru.txt",
     "finko_knowledge_en.txt",
     "finko_knowledge_uz.txt",
-    "finko_knowledge_uz_cyrl.txt",
 ]
 
 

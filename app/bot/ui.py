@@ -1,7 +1,11 @@
 import re
 from typing import Any
 
+from app.bot.language import normalize_supported_lang
+
+
 def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
+    lang = normalize_supported_lang(lang)
     labels_by_lang = {
         "ru": {
             "credits": "Кредиты",
@@ -18,14 +22,6 @@ def get_keyboard_for_lang(lang: str) -> dict[str, Any]:
             "ask_question": "Savol yozish",
             "contacts": "Kontaktlar",
             "placeholder": "Savolingizni yozing...",
-        },
-        "uz_cyrl": {
-            "credits": "Кредитлар",
-            "business": "Бизнес",
-            "partners": "Ҳамкорлар",
-            "ask_question": "Савол ёзиш",
-            "contacts": "Контактлар",
-            "placeholder": "Саволингизни ёзинг...",
         },
         "en": {
             "credits": "Credits",
@@ -56,7 +52,6 @@ def get_language_keyboard() -> dict[str, Any]:
         "keyboard": [
             [{"text": "🇷🇺 Русский"}],
             [{"text": "🇺🇿 O'zbek (Lotin)"}],
-            [{"text": "🇺🇿 Ўзбек (Кирилл)"}],
             [{"text": "🇬🇧 English"}],
         ],
         "resize_keyboard": True,
@@ -70,10 +65,12 @@ def handle_language_selection(text: str) -> str | None:
 
     if "рус" in lowered:
         return "ru"
-    if "lotin" in lowered:
+    if "lotin" in lowered or "o'zbek" in lowered or "uzbek" in lowered:
         return "uz_latn"
+    # Legacy support: if a user presses an old Uzbek Cyrillic keyboard button,
+    # save Uzbek Latin because Cyrillic UI is no longer supported.
     if "кирил" in lowered or "ўзбек" in lowered:
-        return "uz_cyrl"
+        return "uz_latn"
     if "english" in lowered:
         return "en"
 
@@ -81,10 +78,10 @@ def handle_language_selection(text: str) -> str | None:
 
 
 def build_language_saved_text(lang: str) -> str:
+    lang = normalize_supported_lang(lang)
     messages = {
         "ru": "Язык интерфейса сохранён ✅",
         "uz_latn": "Interfeys tili saqlandi ✅",
-        "uz_cyrl": "Интерфейс тили сақланди ✅",
         "en": "Interface language saved ✅",
     }
     return messages.get(lang, messages["ru"])
@@ -94,14 +91,14 @@ def build_start_language_text() -> str:
     return (
         "Выберите язык интерфейса.\n"
         "Choose interface language.\n"
-        "Интерфейс тилини танланг."
+        "Interfeys tilini tanlang."
     )
 
 
 def build_language_clarification_text() -> str:
     return (
         "На каком языке вам удобно получить ответ?\n\n"
-        "Русский / O'zbekcha (lotin) / Ўзбекча (кирилл) / English"
+        "Русский / O'zbekcha (lotin) / English"
     )
 
 
@@ -111,7 +108,7 @@ def strip_cross_language_artifacts(answer: str, lang: str) -> str:
 
     cleaned = answer.strip()
     cleaned = re.sub(
-        r"^(answer|response|ответ|javob|ж[ао]воб)\s*[:：]\s*",
+        r"^(answer|response|ответ|javob)\s*[:：]\s*",
         "",
         cleaned,
         flags=re.IGNORECASE,

@@ -1,6 +1,6 @@
 # FINKO Telegram AI Bot
 
-FastAPI Telegram webhook bot with OpenAI Responses API, FINKO knowledge-base retrieval, analytics, multilingual UI, and a local loan calculator.
+FastAPI Telegram webhook bot with OpenAI Responses API, FINKO knowledge-base retrieval, analytics, three-language UI (Russian, Uzbek Latin, English), and a local loan calculator.
 
 ## Structure
 
@@ -31,6 +31,14 @@ app/
 └── utils/
     └── retry.py            # shared retry helpers
 ```
+
+
+## May 2026 update
+
+- Uzbek Cyrillic was removed from the interface and knowledge-base upload list. Uzbek questions written in Cyrillic are still recognized, but answers are sent in Uzbek Latin.
+- The FINKO partner list was updated: two outdated bank partners were removed; Aloqa Miqromoliya Tashkiloti, Una Moliya, and VAFO MOLIYA were added to MFO partners.
+- E-IMZO knowledge was added in Russian, Uzbek Latin, and English, with a local quick answer for short questions such as `E-imzo kalit nima?`.
+- After changing KB files, run `python kb_setup.py` and update `OPENAI_VECTOR_STORE_ID` in Railway/.env with the new vector store ID.
 
 ## Local setup
 

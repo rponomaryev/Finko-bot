@@ -287,35 +287,6 @@ def format_loan_schedule(
             f"Ariza topshirish: {link}"
         )
 
-    if lang == "uz_cyrl":
-        if payment_type == "annuity":
-            return (
-                f"📊 Аннуитет ҳисоб-китоб\n\n"
-                f"Кредит суммаси: {_fmt(amount)} сўм\n"
-                f"Муддат: {months} ой\n"
-                f"Ставка: {rate}% йиллик\n\n"
-                f"Ойлик тўлов: тахминан {_fmt(first_payment)} сўм\n"
-                f"Жами тўлов: {_fmt(total_payment)} сўм\n"
-                f"Фоиз бўйича ортиқча тўлов: {_fmt(total_interest)} сўм\n\n"
-                f"⚠️ Бу тахминий ҳисоб-китоб. Аниқ шартлар, комиссиялар ва якуний график "
-                f"банк ёки ММТ томонидан белгиланади.\n\n"
-                f"Ариза топшириш: {link}"
-            )
-
-        return (
-            f"📊 Дифференциал ҳисоб-китоб\n\n"
-            f"Кредит суммаси: {_fmt(amount)} сўм\n"
-            f"Муддат: {months} ой\n"
-            f"Ставка: {rate}% йиллик\n\n"
-            f"Биринчи тўлов: тахминан {_fmt(first_payment)} сўм\n"
-            f"Охирги тўлов: тахминан {_fmt(last_payment)} сўм\n"
-            f"Жами тўлов: {_fmt(total_payment)} сўм\n"
-            f"Фоиз бўйича ортиқча тўлов: {_fmt(total_interest)} сўм\n\n"
-            f"⚠️ Бу тахминий ҳисоб-китоб. Аниқ шартлар, комиссиялар ва якуний график "
-            f"банк ёки ММТ томонидан белгиланади.\n\n"
-            f"Ариза топшириш: {link}"
-        )
-
     if payment_type == "annuity":
         return (
             f"📊 Annuity calculation\n\n"
@@ -360,13 +331,6 @@ def ask_payment_type_message(lang: str) -> str:
             "2️⃣ Differensial — to'lov asta-sekin kamayib boradi, "
             "asosiy qarz teng qismlarda to'lanadi.\n\n"
             "«Annuitet» yoki «differensial» deb yozing."
-        ),
-        "uz_cyrl": (
-            "Қайси тўлов турини ҳисоблаш керак?\n\n"
-            "1️⃣ Аннуитет — ҳар ой бир хил тўлов.\n"
-            "2️⃣ Дифференциал — тўлов аста-секин камайиб боради, "
-            "асосий қарз тенг қисмларда тўланади.\n\n"
-            "«Аннуитет» ёки «дифференциал» деб ёзинг."
         ),
         "en": (
             "Which payment type should I calculate?\n\n"
@@ -427,7 +391,6 @@ async def handle_loan_calc(chat_id: int, user_text: str, lang: str) -> str | Non
         messages = {
             "ru": "Хорошо. Теперь укажите сумму кредита, срок и процентную ставку. Например: 234000000 сум, 36 месяцев, 23%.",
             "uz_latn": "Yaxshi. Endi kredit summasi, muddati va foiz stavkasini yozing. Masalan: 234000000 so'm, 36 oy, 23%.",
-            "uz_cyrl": "Яхши. Энди кредит суммаси, муддати ва фоиз ставкаcини ёзинг. Масалан: 234000000 сўм, 36 ой, 23%.",
             "en": "Okay. Now send the loan amount, term, and interest rate. Example: 234000000 UZS, 36 months, 23%.",
         }
         return messages.get(lang, messages["ru"])
@@ -458,7 +421,6 @@ async def handle_loan_calc(chat_id: int, user_text: str, lang: str) -> str | Non
         messages = {
             "ru": "Укажите, пожалуйста, сумму кредита, срок и процентную ставку. Например: 234000000 сум, 36 месяцев, 23%.",
             "uz_latn": "Iltimos, kredit summasi, muddati va foiz stavkasini yozing. Masalan: 234000000 so'm, 36 oy, 23%.",
-            "uz_cyrl": "Илтимос, кредит суммаси, муддати ва фоиз ставкаcини ёзинг. Масалан: 234000000 сўм, 36 ой, 23%.",
             "en": "Please provide the loan amount, term, and interest rate. Example: 234000000 UZS, 36 months, 23%.",
         }
         return messages.get(lang, messages["ru"])

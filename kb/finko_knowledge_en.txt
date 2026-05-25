@@ -78,8 +78,6 @@ Universal Bank
 DavrBank
 Madad Invest Bank
 Garant Bank
-Tenge Bank
-Asia Alliance Bank
 
 Partner MFOs
 
@@ -90,6 +88,9 @@ PULMAN
 APEX MOLIYA
 ANSOR
 ALMIZAN
+Aloqa Miqromoliya Tashkiloti
+Una Moliya
+VAFO MOLIYA
 
 The list of partners may expand. The current catalog is available on the FINKO website.
 
@@ -134,7 +135,7 @@ What exactly are you interested in: a business loan, leasing, or connecting your
 
 Answer:
 
-FINKO works with partner banks Hamkorbank, Universal Bank, DavrBank, Madad Invest Bank, Garant Bank, Tenge Bank, Asia Alliance Bank, as well as MFOs DELTA, PULMAN, APEX MOLIYA, ANSOR, and ALMIZAN. The number of partner organizations is continuously growing.
+FINKO works with partner banks Hamkorbank, Universal Bank, DavrBank, Madad Invest Bank, and Garant Bank. Partner MFOs are DELTA, PULMAN, APEX MOLIYA, ANSOR, ALMIZAN, Aloqa Miqromoliya Tashkiloti, Una Moliya, and VAFO MOLIYA. The number of partner organizations is continuously growing.
 Would you like to learn about partner products or submit an application?
 
 “Contacts”
@@ -159,7 +160,7 @@ Fills out an online application.
 The data is verified through government systems.
 The application is sent to suitable partners.
 The user receives offers and chooses the most suitable one.
-Documents may be signed using a digital signature.
+Documents may be signed using E-IMZO / digital signature.
 
 One application can be sent to several organizations at once.
 
@@ -546,7 +547,7 @@ Answer:
 
 Which language would you like to use?
 
-Русский / O‘zbekcha (lotin) / Ўзбекча (кирилл) / English
+Русский / O'zbekcha (lotin) / English
 
 After clarification:
 
@@ -768,3 +769,21 @@ Differentiated — lower total overpayment, but higher initial payments.
 
 Apply here:
 https://finko.uz/ru
+
+30. E-IMZO AND DIGITAL SIGNATURE
+
+What is E-IMZO?
+
+E-IMZO is an electronic digital signature key/certificate used in Uzbekistan. It is used to confirm a person's identity and sign documents online.
+
+What is an E-IMZO key?
+
+An E-IMZO key is a personal electronic key or certificate linked to its owner. It helps confirm that a document is being signed by the correct person or organization.
+
+Why can E-IMZO be needed in FINKO?
+
+In FINKO, E-IMZO may be required when signing documents with a partner organization. FINKO helps users submit applications, but final documents and terms are determined by the bank, MFO, or other partner.
+
+Security note
+
+Do not share your E-IMZO key, password, SMS codes, or access details with anyone. If there is a technical issue or doubt, contact FINKO support: +998 50 177 77 88 or info@finko.uz.

@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 from app.bot import state
 from app.bot.calculator import handle_loan_calc
 from app.bot.intents import detect_intent, infer_user_type
-from app.bot.language import detect_language, rate_limit_message, server_error_message, too_long_message
+from app.bot.language import detect_language, normalize_supported_lang, rate_limit_message, server_error_message, too_long_message
 from app.bot.quick_answers import handle_menu_or_quick_action
 from app.bot.telegram_update import extract_user_message
 from app.bot.ui import (
@@ -95,6 +95,7 @@ async def telegram_webhook(
     fallback_lang = selected_ui_lang or detect_language(user_text)
     if fallback_lang == "unknown":
         fallback_lang = "ru"
+    fallback_lang = normalize_supported_lang(fallback_lang)
 
     if len(user_text) > MAX_MESSAGE_CHARS:
         if await state.can_send_rate_limit_notice(chat_id):
@@ -123,18 +124,24 @@ async def telegram_webhook(
             username=profile.get("username"),
             first_name=profile.get("first_name"),
             last_name=profile.get("last_name"),
-            language=selected_lang,
+            language=normalize_supported_lang(selected_lang),
             user_type="customer",
-            selected_language=selected_lang,
+            selected_language=normalize_supported_lang(selected_lang),
         )
-        await send_telegram_message(chat_id, build_language_saved_text(selected_lang), ui_lang=selected_lang)
-        await log_event(chat_id, "ui_language_selected", selected_lang)
-        return JSONResponse({"ok": True, "selected_language": selected_lang})
+        saved_lang = normalize_supported_lang(selected_lang)
+        await send_telegram_message(chat_id, build_language_saved_text(saved_lang), ui_lang=saved_lang)
+        await log_event(chat_id, "ui_language_selected", saved_lang)
+        return JSONResponse({"ok": True, "selected_language": saved_lang})
 
     message_lang = detect_language(user_text)
 
+    if message_lang == "unknown" and selected_ui_lang:
+        # If the user already selected an interface language, keep answering in it
+        # instead of showing the language selector again for short queries.
+        message_lang = normalize_supported_lang(selected_ui_lang)
+
     if message_lang == "unknown":
-        fallback_ui_lang = selected_ui_lang or "ru"
+        fallback_ui_lang = normalize_supported_lang(selected_ui_lang or "ru")
         await send_telegram_message(
             chat_id, build_language_clarification_text(),
             ui_lang=fallback_ui_lang, custom_keyboard=get_language_keyboard(),
@@ -142,8 +149,8 @@ async def telegram_webhook(
         await log_event(chat_id, "language_clarification_requested", user_text)
         return JSONResponse({"ok": True, "source": "language_clarification"})
 
-    ui_lang = selected_ui_lang or message_lang
-    response_lang = message_lang
+    ui_lang = normalize_supported_lang(selected_ui_lang or message_lang)
+    response_lang = normalize_supported_lang(message_lang)
     intent = detect_intent(user_text)
     user_type = infer_user_type(intent, user_text)
 
