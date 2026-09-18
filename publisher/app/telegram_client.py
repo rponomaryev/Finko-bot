@@ -114,11 +114,38 @@ class TelegramPublisher:
         )
         return self._message_id_from_updates(result)
 
-    async def publish(self, batch_id: str, body: str) -> int:
+    async def _publish_to(
+        self,
+        destination,
+        scope: str,
+        batch_id: str,
+        body: str,
+    ) -> int:
         async with self._publish_lock:
             async with self._client() as client:
-                peer = await client.get_input_entity(self.settings.destination)
-                return await self._send(client, peer, batch_id, body)
+                peer = await client.get_input_entity(destination)
+                return await self._send(
+                    client,
+                    peer,
+                    f"{scope}:{batch_id}",
+                    body,
+                )
+
+    async def preview(self, batch_id: str, body: str) -> int:
+        return await self._publish_to(
+            self.settings.review_destination,
+            "preview",
+            batch_id,
+            body,
+        )
+
+    async def publish(self, batch_id: str, body: str) -> int:
+        return await self._publish_to(
+            self.settings.destination,
+            "channel",
+            batch_id,
+            body,
+        )
 
     async def probe_custom_emojis(self) -> ProbeResult:
         try:
@@ -142,7 +169,9 @@ class TelegramPublisher:
                     ok=ids == EXPECTED_CUSTOM_EMOJI_IDS,
                     message_id=message_id,
                     returned_custom_emoji_ids=ids,
-                    error=None if ids == EXPECTED_CUSTOM_EMOJI_IDS else "custom_emoji_entity_mismatch",
+                    error=None
+                    if ids == EXPECTED_CUSTOM_EMOJI_IDS
+                    else "custom_emoji_entity_mismatch",
                 )
         except Exception as exc:
             return ProbeResult(
