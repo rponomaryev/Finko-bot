@@ -30,3 +30,31 @@ def test_build_message_constructs_exact_footer_entities():
     assert custom[0].offset == first_emoji_offset
     assert links[0].offset == first_emoji_offset + 2
     assert links[0].length == utf16_len("Instagram")
+
+
+def test_build_message_parses_supported_telegram_html_before_footer():
+    body = '<b>Headline</b>\n\nText &amp; context. Manba: <a href="https://example.com/source">Markaziy bank</a> va <i>izoh</i>.'
+
+    text, entities = build_message(body)
+
+    assert text.startswith('Headline\n\nText & context. Manba: Markaziy bank va izoh.')
+    assert '<b>' not in text
+    assert '<a ' not in text
+    assert '<i>' not in text
+
+    bold = next(e for e in entities if e.kind == 'bold')
+    assert bold.offset == 0
+    assert bold.length == utf16_len('Headline')
+
+    source_link = next(
+        e for e in entities
+        if e.kind == 'text_url' and e.url == 'https://example.com/source'
+    )
+    source_prefix = 'Headline\n\nText & context. Manba: '
+    assert source_link.offset == utf16_len(source_prefix)
+    assert source_link.length == utf16_len('Markaziy bank')
+
+    italic = next(e for e in entities if e.kind == 'italic')
+    italic_prefix = source_prefix + 'Markaziy bank va '
+    assert italic.offset == utf16_len(italic_prefix)
+    assert italic.length == utf16_len('izoh')
