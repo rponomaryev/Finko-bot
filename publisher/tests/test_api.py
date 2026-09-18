@@ -60,3 +60,35 @@ def test_publish_rejects_oversized_text(monkeypatch):
         json={"batch_id": "b1", "text": "x" * 3900},
     )
     assert response.status_code == 422
+
+
+class FakeProbePublisher(FakePublisher):
+    async def probe_custom_emojis(self):
+        class Result:
+            ok = True
+            message_id = 888
+            returned_custom_emoji_ids = (1, 2, 3, 4)
+            error = None
+        return Result()
+
+
+def test_internal_probe_requires_token(monkeypatch):
+    monkeypatch.setattr(main, "publisher", FakeProbePublisher())
+    monkeypatch.setattr(main, "PROBE_TOKEN", "probe-secret")
+    client = TestClient(main.app)
+    response = client.get("/internal/probe/wrong")
+    assert response.status_code == 404
+
+
+def test_internal_probe_returns_entity_ids(monkeypatch):
+    monkeypatch.setattr(main, "publisher", FakeProbePublisher())
+    monkeypatch.setattr(main, "PROBE_TOKEN", "probe-secret")
+    client = TestClient(main.app)
+    response = client.get("/internal/probe/probe-secret")
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "message_id": 888,
+        "returned_custom_emoji_ids": [1, 2, 3, 4],
+        "error": None,
+    }
