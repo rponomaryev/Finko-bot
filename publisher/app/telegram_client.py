@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import asyncio
 import hashlib
 
 from .config import Settings
@@ -62,6 +63,7 @@ def _telethon_entities(specs: list[EntitySpec]):
 class TelegramPublisher:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._publish_lock = asyncio.Lock()
 
     def _client(self):
         from telethon import TelegramClient
@@ -99,9 +101,10 @@ class TelegramPublisher:
         return self._message_id_from_updates(result)
 
     async def publish(self, batch_id: str, body: str) -> int:
-        async with self._client() as client:
-            peer = await client.get_input_entity(self.settings.destination)
-            return await self._send(client, peer, batch_id, body)
+        async with self._publish_lock:
+            async with self._client() as client:
+                peer = await client.get_input_entity(self.settings.destination)
+                return await self._send(client, peer, batch_id, body)
 
     async def probe_custom_emojis(self) -> ProbeResult:
         try:
