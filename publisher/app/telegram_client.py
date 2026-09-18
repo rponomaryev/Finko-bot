@@ -55,6 +55,20 @@ def _telethon_entities(specs: list[EntitySpec]):
                     url=str(spec.url),
                 )
             )
+        elif spec.kind == "bold":
+            result.append(
+                types.MessageEntityBold(
+                    offset=spec.offset,
+                    length=spec.length,
+                )
+            )
+        elif spec.kind == "italic":
+            result.append(
+                types.MessageEntityItalic(
+                    offset=spec.offset,
+                    length=spec.length,
+                )
+            )
         else:
             raise ValueError(f"unsupported_entity_kind:{spec.kind}")
     return result
