@@ -1,7 +1,5 @@
 import asyncio
 
-import pytest
-
 from app.config import Settings
 from app.telegram_client import TelegramPublisher
 
@@ -41,13 +39,13 @@ class TrackingPublisher(TelegramPublisher):
         return 100
 
 
-@pytest.mark.asyncio
-async def test_concurrent_publish_calls_are_serialized():
-    publisher = TrackingPublisher()
+def test_concurrent_publish_calls_are_serialized():
+    async def run_case():
+        publisher = TrackingPublisher()
+        await asyncio.gather(
+            publisher.publish("batch-1", "one"),
+            publisher.publish("batch-2", "two"),
+        )
+        assert publisher.max_active_sends == 1
 
-    await asyncio.gather(
-        publisher.publish("batch-1", "one"),
-        publisher.publish("batch-2", "two"),
-    )
-
-    assert publisher.max_active_sends == 1
+    asyncio.run(run_case())
