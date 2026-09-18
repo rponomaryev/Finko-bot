@@ -1,5 +1,6 @@
 import hmac
 import logging
+import os
 
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -12,6 +13,7 @@ logger = logging.getLogger("finko.publisher")
 settings = Settings.from_env()
 PUBLISH_KEY = settings.publish_key
 publisher = TelegramPublisher(settings)
+PROBE_TOKEN = os.environ.get("PROBE_TOKEN", "")
 app = FastAPI(title="FINKO Telegram Publisher")
 
 
@@ -56,4 +58,17 @@ async def publish(
         "batch_id": payload.batch_id,
         "chat": "@finkouz",
         "message_id": message_id,
+    }
+
+
+@app.get("/internal/probe/{token}")
+async def internal_probe(token: str):
+    if not PROBE_TOKEN or not hmac.compare_digest(token, PROBE_TOKEN):
+        raise HTTPException(status_code=404, detail="not_found")
+    result = await publisher.probe_custom_emojis()
+    return {
+        "ok": result.ok,
+        "message_id": result.message_id,
+        "returned_custom_emoji_ids": list(result.returned_custom_emoji_ids),
+        "error": result.error,
     }
