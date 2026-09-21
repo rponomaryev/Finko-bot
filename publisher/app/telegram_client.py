@@ -91,6 +91,10 @@ class TelegramPublisher:
 
     @staticmethod
     def _message_id_from_updates(result) -> int:
+        message_id = getattr(result, "id", None)
+        if message_id is not None:
+            return int(message_id)
+
         for update in getattr(result, "updates", ()):
             message = getattr(update, "message", None)
             message_id = getattr(message, "id", None)
