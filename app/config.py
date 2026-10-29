@@ -1,4 +1,6 @@
 import logging
+import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -12,6 +14,40 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
+# HTTPX logs include Telegram's bot token in the request URL at INFO level.
+# Keep error logs, but redact tokens across the log handlers used by Uvicorn.
+_TELEGRAM_TOKEN_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_-])(?:bot)?[0-9]{5,16}:[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])"
+)
+_REDACTED = "[REDACTED_TELEGRAM_TOKEN]"
+
+
+class SecretRedactingFormatter(logging.Formatter):
+    """Redact Telegram credentials even when they appear in tracebacks."""
+
+    def __init__(self, wrapped: logging.Formatter | None = None):
+        super().__init__()
+        self.wrapped = wrapped or logging.Formatter()
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = self.wrapped.format(record)
+        configured = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        if configured:
+            message = message.replace(configured, _REDACTED)
+        return _TELEGRAM_TOKEN_PATTERN.sub(_REDACTED, message)
+
+
+def install_secret_safe_logging() -> None:
+    """Cover root, Uvicorn and app handlers without changing their format."""
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    for name in ("", "telegram-ai-bot", "uvicorn", "uvicorn.error", "uvicorn.access", "httpx", "httpcore"):
+        for handler in logging.getLogger(name).handlers:
+            if not isinstance(handler.formatter, SecretRedactingFormatter):
+                handler.setFormatter(SecretRedactingFormatter(handler.formatter))
+
+
+install_secret_safe_logging()
 logger = logging.getLogger("telegram-ai-bot")
 
 
