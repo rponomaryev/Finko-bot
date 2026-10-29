@@ -5,13 +5,14 @@ from fastapi import FastAPI
 from app.analytics.routes import router as analytics_router
 from app.bot.handlers import router as telegram_router
 from app.bot.state import close_state_store, init_state_store
-from app.config import DATABASE_PATH, logger
+from app.config import DATABASE_PATH, install_secret_safe_logging, logger
 from app.db.connection import init_db
 from app.services.telegram import close_telegram_client, init_telegram_client, set_telegram_menu_button
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    install_secret_safe_logging()
     await init_db()
     logger.info("Database initialized at %s", DATABASE_PATH)
 
